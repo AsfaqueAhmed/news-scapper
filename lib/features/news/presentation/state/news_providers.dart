@@ -8,11 +8,13 @@ import '../../data/datasources/news_remote_data_source.dart';
 import '../../data/datasources/share_data_source.dart';
 import '../../data/repositories/news_repository_impl.dart';
 import '../../domain/repositories/news_repository.dart';
+import '../../domain/usecases/compose_share_card_usecase.dart';
 import '../../domain/usecases/get_cached_articles_usecase.dart';
 import '../../domain/usecases/group_siblings_usecase.dart';
+import '../../domain/usecases/load_share_image_usecase.dart';
 import '../../domain/usecases/mark_article_read_usecase.dart';
 import '../../domain/usecases/refresh_articles_usecase.dart';
-import '../../domain/usecases/share_article_usecase.dart';
+import '../../domain/usecases/share_composed_card_usecase.dart';
 import 'news_notifier.dart';
 import 'news_state.dart';
 
@@ -57,8 +59,16 @@ final markArticleReadUseCaseProvider = Provider<MarkArticleReadUseCase>(
   (ref) => MarkArticleReadUseCase(ref.watch(newsRepositoryProvider)),
 );
 
-final shareArticleUseCaseProvider = Provider<ShareArticleUseCase>(
-  (ref) => ShareArticleUseCase(ref.watch(newsRepositoryProvider)),
+final loadShareImageUseCaseProvider = Provider<LoadShareImageUseCase>(
+  (ref) => LoadShareImageUseCase(ref.watch(newsRepositoryProvider)),
+);
+
+final composeShareCardUseCaseProvider = Provider<ComposeShareCardUseCase>(
+  (ref) => ComposeShareCardUseCase(ref.watch(newsRepositoryProvider)),
+);
+
+final shareComposedCardUseCaseProvider = Provider<ShareComposedCardUseCase>(
+  (ref) => ShareComposedCardUseCase(ref.watch(newsRepositoryProvider)),
 );
 
 final groupSiblingsUseCaseProvider =

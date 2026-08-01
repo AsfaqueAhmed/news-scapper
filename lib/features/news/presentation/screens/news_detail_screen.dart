@@ -7,6 +7,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/date_format.dart';
 import '../../domain/entities/article.dart';
 import '../state/news_providers.dart';
+import 'share_preview_screen.dart';
 
 class NewsDetailScreen extends ConsumerWidget {
   final Article article;
@@ -38,7 +39,9 @@ class NewsDetailScreen extends ConsumerWidget {
           IconButton(
             icon: const Icon(Icons.ios_share_rounded),
             tooltip: 'Share',
-            onPressed: () => ref.read(newsNotifierProvider.notifier).shareArticle(article),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => SharePreviewScreen(article: article)),
+            ),
           ),
           const SizedBox(width: 4),
         ],

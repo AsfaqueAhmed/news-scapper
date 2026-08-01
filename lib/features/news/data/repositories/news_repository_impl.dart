@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:uuid/uuid.dart';
 
 import '../../../settings/domain/entities/news_source.dart';
@@ -11,6 +14,7 @@ import '../datasources/news_prefs_data_source.dart';
 import '../datasources/news_remote_data_source.dart';
 import '../datasources/share_data_source.dart';
 import '../models/article_model.dart';
+import '../share/share_card_renderer.dart';
 
 class NewsRepositoryImpl implements NewsRepository {
   final NewsSupabaseDataSource _supabaseDataSource;
@@ -100,8 +104,16 @@ class NewsRepositoryImpl implements NewsRepository {
   Future<void> markRead(String articleId) => _supabaseDataSource.markRead(articleId);
 
   @override
-  Future<void> shareArticle(Article article) async {
-    await _shareDataSource.shareArticle(ArticleModel.fromEntity(article));
+  Future<ui.Image?> loadShareImage(Article article) =>
+      _shareDataSource.loadImage(article.imageUrl);
+
+  @override
+  Future<Uint8List> composeShareCard(Article article, ui.Image? image, ShareCardConfig config) =>
+      _shareDataSource.composeCard(ArticleModel.fromEntity(article), image, config);
+
+  @override
+  Future<void> shareComposedCard(Article article, Uint8List pngBytes) async {
+    await _shareDataSource.shareComposedCard(ArticleModel.fromEntity(article), pngBytes);
     await _prefsDataSource.setLastShared(DateTime.now(), article.title);
   }
 }

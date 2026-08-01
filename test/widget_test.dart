@@ -1,8 +1,12 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:news_scrapper/app.dart';
+import 'package:news_scrapper/features/news/data/share/share_card_renderer.dart';
 import 'package:news_scrapper/features/news/domain/entities/article.dart';
 import 'package:news_scrapper/features/news/domain/entities/cached_news.dart';
 import 'package:news_scrapper/features/news/domain/entities/refresh_result.dart';
@@ -47,7 +51,14 @@ class _FakeNewsRepository implements NewsRepository {
   Future<void> markRead(String articleId) async {}
 
   @override
-  Future<void> shareArticle(Article article) async {}
+  Future<ui.Image?> loadShareImage(Article article) async => null;
+
+  @override
+  Future<Uint8List> composeShareCard(Article article, ui.Image? image, ShareCardConfig config) async =>
+      Uint8List(0);
+
+  @override
+  Future<void> shareComposedCard(Article article, Uint8List pngBytes) async {}
 }
 
 void main() {
