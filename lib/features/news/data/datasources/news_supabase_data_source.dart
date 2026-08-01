@@ -8,9 +8,15 @@ class NewsSupabaseDataSource {
 
   NewsSupabaseDataSource(this._client);
 
+  /// Excludes `is_read` from the upsert payload: a re-scraped article is
+  /// always freshly parsed as unread, and upserting that would silently
+  /// clobber a user's "read" state every time the source is re-fetched.
+  /// Leaving it out of the payload means new rows still get `false` (the
+  /// column default) while existing rows keep whatever `is_read` they had.
   Future<void> upsertArticles(List<ArticleModel> articles) async {
     if (articles.isEmpty) return;
-    await _client.from('articles').upsert(articles.map((a) => a.toMap()).toList());
+    final rows = articles.map((a) => a.toMap()..remove('is_read')).toList();
+    await _client.from('articles').upsert(rows);
   }
 
   Future<void> updateArticleEnrichment(
