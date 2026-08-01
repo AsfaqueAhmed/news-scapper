@@ -31,8 +31,9 @@ final newsEnrichmentDataSourceProvider = Provider<NewsEnrichmentDataSource>(
 final newsPrefsDataSourceProvider =
     Provider<NewsPrefsDataSource>((ref) => NewsPrefsDataSource());
 
-final shareDataSourceProvider =
-    Provider<ShareDataSource>((ref) => ShareDataSource());
+final shareDataSourceProvider = Provider<ShareDataSource>(
+  (ref) => ShareDataSource(ref.watch(httpClientProvider)),
+);
 
 final newsRepositoryProvider = Provider<NewsRepository>(
   (ref) => NewsRepositoryImpl(
