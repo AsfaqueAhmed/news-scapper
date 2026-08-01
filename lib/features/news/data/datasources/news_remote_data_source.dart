@@ -147,8 +147,15 @@ class NewsRemoteDataSource {
     return match?.group(1);
   }
 
+  // Scoped by source: a publisher that runs multiple feeds (e.g. BBC's
+  // News/UK/World feeds all link back to the same bbc.co.uk article URLs)
+  // would otherwise collapse into a single row, with whichever source's
+  // batch ran last silently overwriting the others. Keeping them as
+  // separate per-source rows matches how genuinely different publishers
+  // covering the same story already work -- the AI enrichment's groupId
+  // links them together as "N sources" instead of one silently winning.
   String _articleId(String sourceId, String link, String title) {
-    final basis = link.isNotEmpty ? link : '$sourceId|$title';
+    final basis = link.isNotEmpty ? '$sourceId|$link' : '$sourceId|$title';
     return sha1.convert(utf8.encode(basis)).toString();
   }
 }

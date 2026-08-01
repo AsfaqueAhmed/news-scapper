@@ -119,8 +119,15 @@ function parseDate(raw?: string | null): string {
   return new Date().toISOString();
 }
 
+// Scoped by source: a publisher that runs multiple feeds (e.g. BBC's
+// News/UK/World feeds all link back to the same bbc.co.uk article URLs)
+// would otherwise collapse into a single row, with whichever source's
+// batch ran last silently overwriting the others. Keeping them as
+// separate per-source rows matches how genuinely different publishers
+// covering the same story already work -- the AI enrichment's groupId
+// links them together as "N sources" instead of one silently winning.
 async function articleId(link: string, sourceId: string, title: string): Promise<string> {
-  const basis = link.length > 0 ? link : `${sourceId}|${title}`;
+  const basis = link.length > 0 ? `${sourceId}|${link}` : `${sourceId}|${title}`;
   const data = new TextEncoder().encode(basis);
   const hash = await crypto.subtle.digest("SHA-1", data);
   return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
