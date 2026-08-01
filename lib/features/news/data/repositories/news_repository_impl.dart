@@ -55,16 +55,22 @@ class NewsRepositoryImpl implements NewsRepository {
       }
     }
 
-    if (fetched.isNotEmpty) {
-      await _supabaseDataSource.upsertArticles(fetched);
+    // Some feeds list the same story more than once (e.g. under multiple
+    // categories); dedupe by id before a batch upsert, since Postgres
+    // rejects an ON CONFLICT DO UPDATE that would touch the same row twice
+    // in one statement.
+    final dedupedFetched = {for (final a in fetched) a.id: a}.values.toList();
+
+    if (dedupedFetched.isNotEmpty) {
+      await _supabaseDataSource.upsertArticles(dedupedFetched);
     }
 
     if (openRouterToken != null &&
         openRouterToken.isNotEmpty &&
-        fetched.isNotEmpty) {
+        dedupedFetched.isNotEmpty) {
       try {
         final enrichments = await _enrichmentDataSource.enrich(
-          fetched,
+          dedupedFetched,
           openRouterToken,
           runId: const Uuid().v4(),
         );

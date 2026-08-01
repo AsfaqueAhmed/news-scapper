@@ -54,10 +54,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Future<void> _refresh() async {
     final settings = ref.read(settingsNotifierProvider);
     final newsNotifier = ref.read(newsNotifierProvider.notifier);
-    await newsNotifier.refresh(
-      sources: settings.enabledSources,
-      openRouterToken: settings.openRouterToken,
-    );
+    try {
+      await newsNotifier.refresh(
+        sources: settings.enabledSources,
+        openRouterToken: settings.openRouterToken,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Refresh failed: $e')),
+        );
+      }
+      return;
+    }
     final errors = ref.read(newsNotifierProvider).lastRunErrors;
     if (mounted && errors.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(

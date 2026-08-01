@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:dart_rss/dart_rss.dart';
 import 'package:http/http.dart' as http;
 
+import '../../../../core/config/supabase_config.dart';
 import '../../../settings/domain/entities/news_source.dart';
 import '../models/article_model.dart';
 
@@ -24,12 +25,19 @@ class NewsRemoteDataSource {
   /// Fetches and parses a single source's feed. Throws [RssFetchException]
   /// on network or parse failure so callers can decide how to surface it
   /// without aborting the whole scrape run.
+  ///
+  /// Routed through the `fetch-feed` Supabase Edge Function rather than
+  /// fetched directly: most news RSS feeds don't send CORS headers, so a
+  /// direct browser fetch is blocked on web. The edge function fetches the
+  /// feed server-side and returns it with permissive CORS headers, and
+  /// works the same way on every platform.
   Future<List<ArticleModel>> fetchSource(NewsSource source) async {
+    final proxyUrl = Uri.parse('${SupabaseConfig.url}/functions/v1/fetch-feed')
+        .replace(queryParameters: {'url': source.feedUrl});
+
     late final http.Response response;
     try {
-      response = await _client
-          .get(Uri.parse(source.feedUrl))
-          .timeout(const Duration(seconds: 20));
+      response = await _client.get(proxyUrl).timeout(const Duration(seconds: 20));
     } catch (e) {
       throw RssFetchException(source.name, 'Network error: $e');
     }
