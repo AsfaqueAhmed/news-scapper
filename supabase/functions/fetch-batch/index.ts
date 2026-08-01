@@ -67,9 +67,33 @@ function asArray<T>(v: T | T[] | undefined | null): T[] {
   return Array.isArray(v) ? v : [v];
 }
 
-function stripHtml(html?: string | null): string | null {
-  if (html === undefined || html === null) return null;
-  const text = String(html)
+// fast-xml-parser only gives back a plain string for a tag whose content
+// is pure text. A tag containing markup -- e.g. The Daily Star wraps
+// headlines as `<title><a href="...">Real Headline</a></title>` -- parses
+// into a nested object instead (keyed by child tag name, "#text" for
+// surrounding text, "@_..." for attributes). Naively `String()`-ing that
+// object produces the literal text "[object Object]" rather than the
+// headline. Recursively collect every text fragment so any such nesting
+// still yields real text.
+function extractText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(extractText).join(" ");
+  if (typeof value === "object") {
+    const parts: string[] = [];
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (key.startsWith("@_")) continue; // skip XML attributes
+      parts.push(extractText(val));
+    }
+    return parts.join(" ");
+  }
+  return "";
+}
+
+function stripHtml(value?: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const text = extractText(value)
     .replace(/<[^>]*>/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
