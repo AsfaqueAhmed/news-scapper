@@ -88,43 +88,49 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('News Dashboard'),
-        bottom: _tabController == null
-            ? null
-            : TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                tabs: _tabSourceIds.map((id) {
-                  if (id == 'all') return const Tab(text: 'All');
-                  final source = settings.sources.firstWhere((s) => s.id == id);
-                  return Tab(text: source.name);
-                }).toList(),
-              ),
+        title: const Text('News'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SettingsScreen()),
             ),
           ),
+          const SizedBox(width: 4),
         ],
-      ),
-      body: Column(
-        children: [
-          const _StatusBar(),
-          Expanded(
-            child: _tabController == null
-                ? const Center(child: CircularProgressIndicator())
-                : TabBarView(
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(88),
+          child: Column(
+            children: [
+              const _StatusBar(),
+              if (_tabController != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: TabBar(
                     controller: _tabController,
-                    children: _tabSourceIds.map((id) {
-                      final sourceId = id == 'all' ? null : id;
-                      return _NewsList(sourceId: sourceId, onRefresh: _refresh);
+                    isScrollable: true,
+                    tabAlignment: TabAlignment.start,
+                    tabs: _tabSourceIds.map((id) {
+                      if (id == 'all') return const Tab(text: 'All');
+                      final source = settings.sources.firstWhere((s) => s.id == id);
+                      return Tab(text: source.name);
                     }).toList(),
                   ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
+      body: _tabController == null
+          ? const Center(child: CircularProgressIndicator())
+          : TabBarView(
+              controller: _tabController,
+              children: _tabSourceIds.map((id) {
+                final sourceId = id == 'all' ? null : id;
+                return _NewsList(sourceId: sourceId, onRefresh: _refresh);
+              }).toList(),
+            ),
     );
   }
 }
@@ -145,47 +151,37 @@ class _StatusBar extends ConsumerWidget {
     final news = ref.watch(newsNotifierProvider);
     final theme = Theme.of(context);
     final lastShared = news.lastShared;
-    return Container(
-      width: double.infinity,
-      color: theme.colorScheme.surfaceContainerHighest,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(Icons.update, size: 14, color: theme.colorScheme.onSurfaceVariant),
-              const SizedBox(width: 6),
-              Text(
-                'Last scraped: ${relativeTime(news.lastScrapedAt)}',
-                style: theme.textTheme.bodySmall,
+          Icon(Icons.schedule_rounded, size: 13, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 4),
+          Text('Updated ${relativeTime(news.lastScrapedAt)}', style: theme.textTheme.labelSmall),
+          if (news.isRefreshing) ...[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 11,
+              height: 11,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: theme.colorScheme.primary,
               ),
-              if (news.isRefreshing) ...[
-                const SizedBox(width: 8),
-                const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 2),
-          Row(
-            children: [
-              Icon(Icons.share, size: 14, color: theme.colorScheme.onSurfaceVariant),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  lastShared == null
-                      ? 'Last shared: Never'
-                      : 'Last shared: ${lastShared.$2} (${relativeTime(lastShared.$1)})',
-                  style: theme.textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
+            ),
+          ],
+          if (lastShared != null) ...[
+            Text('  ·  ', style: theme.textTheme.labelSmall),
+            Icon(Icons.ios_share_rounded, size: 12, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                'Shared ${relativeTime(lastShared.$1)}',
+                style: theme.textTheme.labelSmall,
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     );
@@ -207,25 +203,39 @@ class _NewsList extends ConsumerWidget {
     if (articles.isEmpty && !news.isRefreshing) {
       return RefreshIndicator(
         onRefresh: onRefresh,
-        child: ListView(
-          children: const [
-            SizedBox(height: 120),
-            Center(child: Text('No articles yet. Pull to refresh.')),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) => ListView(
+            children: [
+              SizedBox(
+                height: constraints.maxHeight,
+                child: _EmptyState(onRefresh: onRefresh),
+              ),
+            ],
+          ),
         ),
       );
     }
 
     return RefreshIndicator(
       onRefresh: onRefresh,
-      child: ListView.builder(
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         itemCount: articles.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, index) {
           final article = articles[index];
           final siblings = notifier.groupSiblings(article);
+          final siblingCount = siblings.map((a) => a.sourceId).toSet().length;
+          if (index == 0) {
+            return FeaturedArticleCard(
+              article: article,
+              siblingSourceCount: siblingCount,
+              onTap: () => _openDetail(context, ref, article),
+            );
+          }
           return ArticleCard(
             article: article,
-            siblingSourceCount: siblings.map((a) => a.sourceId).toSet().length,
+            siblingSourceCount: siblingCount,
             onTap: () => _openDetail(context, ref, article),
           );
         },
@@ -237,6 +247,55 @@ class _NewsList extends ConsumerWidget {
     ref.read(newsNotifierProvider.notifier).markRead(article);
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => NewsDetailScreen(article: article)),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final Future<void> Function() onRefresh;
+
+  const _EmptyState({required this.onRefresh});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.rss_feed_rounded,
+                size: 32,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text('No articles yet', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              'Pull down or tap refresh to scrape the latest stories.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.tonalIcon(
+              onPressed: onRefresh,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Refresh now'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -63,7 +63,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('News Dashboard'), findsOneWidget);
-    expect(find.byIcon(Icons.settings), findsOneWidget);
+    expect(find.text('News'), findsOneWidget);
+    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
   });
 }
