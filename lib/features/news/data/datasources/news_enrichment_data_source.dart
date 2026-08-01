@@ -1,6 +1,4 @@
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/article_model.dart';
 
@@ -20,14 +18,14 @@ class ArticleEnrichment {
   ArticleEnrichment({required this.articleId, this.category, this.groupId});
 }
 
-/// Uses an OpenRouter-hosted LLM to tag articles with a topic category and
-/// to detect when articles from different sources cover the same story,
-/// assigning them a shared groupId.
+/// Calls the `enrich-articles` Supabase Edge Function, which asks an
+/// OpenRouter-hosted LLM to tag articles with a topic category and detect
+/// when articles from different sources cover the same story, assigning
+/// them a shared groupId. The OpenRouter key lives server-side (as the
+/// edge function's `OPENROUTER_API_KEY` secret) so it never ships in the
+/// client; [apiToken] is only sent when the user has set their own.
 class NewsEnrichmentDataSource {
-  static const _endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-  static const _defaultModel = 'openai/gpt-4o-mini';
-
-  final http.Client _client;
+  final SupabaseClient _client;
 
   NewsEnrichmentDataSource(this._client);
 
@@ -35,99 +33,51 @@ class NewsEnrichmentDataSource {
   /// unique within this single batch) so articles from different scrape
   /// runs never collide into the same stored groupId.
   Future<List<ArticleEnrichment>> enrich(
-    List<ArticleModel> articles,
-    String apiToken, {
+    List<ArticleModel> articles, {
     required String runId,
-    String model = _defaultModel,
+    String? apiToken,
   }) async {
     if (articles.isEmpty) return [];
 
-    final indexed = [
-      for (var i = 0; i < articles.length; i++)
-        {
-          'index': i,
-          'title': articles[i].title,
-          'source': articles[i].sourceName,
-          'description': articles[i].description ?? '',
-        }
-    ];
-
-    final prompt = '''
-You are given a JSON array of news articles freshly scraped from multiple
-RSS sources. For each article, decide:
-1. "category": a short topic label (e.g. "Politics", "Technology", "Sports",
-   "Business", "Health", "Science", "Entertainment", "World", "Other").
-2. "group": an integer group key shared by every article that reports on
-   the SAME real-world news story, even if wording differs across sources.
-   Articles that are the only coverage of their story get a group key that
-   no other article shares (e.g. their own index).
-
-Articles:
-${jsonEncode(indexed)}
-
-Respond with ONLY a JSON array, no prose, in this exact shape:
-[{"index": 0, "category": "Technology", "group": 0}, ...]
-''';
-
-    final response = await _client
-        .post(
-          Uri.parse(_endpoint),
-          headers: {
-            'Authorization': 'Bearer $apiToken',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({
-            'model': model,
-            'messages': [
-              {'role': 'user', 'content': prompt}
-            ],
-            'temperature': 0,
-          }),
-        )
-        .timeout(const Duration(seconds: 45));
-
-    if (response.statusCode != 200) {
-      throw OpenRouterException('HTTP ${response.statusCode}: ${response.body}');
-    }
-
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    final content =
-        decoded['choices']?[0]?['message']?['content'] as String?;
-    if (content == null) {
-      throw OpenRouterException('Unexpected response shape: ${response.body}');
-    }
-
-    final jsonText = _extractJsonArray(content);
-    final List<dynamic> parsed;
+    final FunctionResponse response;
     try {
-      parsed = jsonDecode(jsonText) as List<dynamic>;
-    } catch (e) {
-      throw OpenRouterException('Could not parse model output as JSON: $e');
-    }
-
-    final results = <ArticleEnrichment>[];
-    for (final entry in parsed) {
-      final map = entry as Map<String, dynamic>;
-      final index = map['index'] as int?;
-      if (index == null || index < 0 || index >= articles.length) continue;
-      final groupKey = map['group'];
-      results.add(
-        ArticleEnrichment(
-          articleId: articles[index].id,
-          category: map['category'] as String?,
-          groupId: groupKey != null ? '${runId}_g${groupKey.toString()}' : null,
-        ),
+      response = await _client.functions.invoke(
+        'enrich-articles',
+        body: {
+          'runId': runId,
+          if (apiToken != null && apiToken.isNotEmpty) 'userToken': apiToken,
+          'articles': [
+            for (final a in articles)
+              {
+                'id': a.id,
+                'title': a.title,
+                'source': a.sourceName,
+                'description': a.description ?? '',
+              },
+          ],
+        },
       );
+    } on FunctionException catch (e) {
+      throw OpenRouterException('HTTP ${e.status}: ${e.details}');
+    } catch (e) {
+      throw OpenRouterException('Request failed: $e');
     }
-    return results;
-  }
 
-  String _extractJsonArray(String content) {
-    final start = content.indexOf('[');
-    final end = content.lastIndexOf(']');
-    if (start == -1 || end == -1 || end < start) {
-      throw OpenRouterException('No JSON array found in model output');
+    final data = response.data;
+    if (data is Map && data['error'] != null) {
+      throw OpenRouterException(data['error'].toString());
     }
-    return content.substring(start, end + 1);
+    if (data is! List) {
+      throw OpenRouterException('Unexpected response shape: $data');
+    }
+
+    return [
+      for (final entry in data)
+        ArticleEnrichment(
+          articleId: entry['articleId'] as String,
+          category: entry['category'] as String?,
+          groupId: entry['groupId'] as String?,
+        ),
+    ];
   }
 }

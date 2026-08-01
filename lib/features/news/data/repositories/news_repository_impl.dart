@@ -65,14 +65,15 @@ class NewsRepositoryImpl implements NewsRepository {
       await _supabaseDataSource.upsertArticles(dedupedFetched);
     }
 
-    if (openRouterToken != null &&
-        openRouterToken.isNotEmpty &&
-        dedupedFetched.isNotEmpty) {
+    // Enrichment runs whenever there's something new to enrich: the edge
+    // function uses the user's token if they've set one in Settings,
+    // otherwise falls back to the project's own OpenRouter key.
+    if (dedupedFetched.isNotEmpty) {
       try {
         final enrichments = await _enrichmentDataSource.enrich(
           dedupedFetched,
-          openRouterToken,
           runId: const Uuid().v4(),
+          apiToken: openRouterToken,
         );
         for (final e in enrichments) {
           await _supabaseDataSource.updateArticleEnrichment(

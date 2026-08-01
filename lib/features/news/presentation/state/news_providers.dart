@@ -25,7 +25,7 @@ final newsRemoteDataSourceProvider = Provider<NewsRemoteDataSource>(
 );
 
 final newsEnrichmentDataSourceProvider = Provider<NewsEnrichmentDataSource>(
-  (ref) => NewsEnrichmentDataSource(ref.watch(httpClientProvider)),
+  (ref) => NewsEnrichmentDataSource(ref.watch(supabaseClientProvider)),
 );
 
 final newsPrefsDataSourceProvider =
