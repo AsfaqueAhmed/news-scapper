@@ -16,6 +16,11 @@ import '../datasources/share_data_source.dart';
 import '../models/article_model.dart';
 import '../share/share_card_renderer.dart';
 
+/// AI enrichment (OpenRouter categorization/same-story grouping) is
+/// temporarily switched off -- flip to true to re-enable calling the
+/// enrich-articles edge function. Nothing else in the pipeline changes.
+const _enrichmentEnabled = false;
+
 class NewsRepositoryImpl implements NewsRepository {
   final NewsSupabaseDataSource _supabaseDataSource;
   final NewsRemoteDataSource _remoteDataSource;
@@ -72,7 +77,7 @@ class NewsRepositoryImpl implements NewsRepository {
     // Enrichment runs whenever there's something new to enrich: the edge
     // function uses the user's token if they've set one in Settings,
     // otherwise falls back to the project's own OpenRouter key.
-    if (dedupedFetched.isNotEmpty) {
+    if (_enrichmentEnabled && dedupedFetched.isNotEmpty) {
       try {
         final enrichments = await _enrichmentDataSource.enrich(
           dedupedFetched,

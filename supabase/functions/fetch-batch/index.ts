@@ -14,6 +14,9 @@ const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
 
 const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = "openai/gpt-4o-mini";
+// AI enrichment is temporarily switched off -- flip to true to resume
+// calling OpenRouter from the scheduled scrape. Nothing else changes.
+const ENRICHMENT_ENABLED = false;
 const PRUNE_AFTER_DAYS = 14;
 const DEFAULT_BATCH_SIZE = 5;
 
@@ -406,7 +409,7 @@ Deno.serve(async (req: Request) => {
   }
 
   let enrichedCount = 0;
-  if (deduped.length > 0) {
+  if (ENRICHMENT_ENABLED && deduped.length > 0) {
     try {
       const enrichments = await enrichArticles(deduped, runId);
       for (const e of enrichments) {
