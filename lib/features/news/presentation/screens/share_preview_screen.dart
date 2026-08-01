@@ -9,8 +9,8 @@ import '../../data/share/share_card_renderer.dart';
 import '../../domain/entities/article.dart';
 import '../state/news_providers.dart';
 
-/// Lets the user pick a title layout, toggle the title on/off, and
-/// zoom/pan the photo before the native share sheet opens.
+/// Lets the user swipe through ready-made share templates and share
+/// whichever one is centered.
 class SharePreviewScreen extends ConsumerStatefulWidget {
   final Article article;
 
@@ -21,16 +21,27 @@ class SharePreviewScreen extends ConsumerStatefulWidget {
 }
 
 class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
+  final _pageController = PageController(viewportFraction: 0.82);
+
   ui.Image? _image;
   bool _loadingImage = true;
   bool _sharing = false;
-  ShareCardConfig _config = const ShareCardConfig();
-  double _startZoom = 1;
+  int _currentPage = 0;
 
   @override
   void initState() {
     super.initState();
     _loadImage();
+    _pageController.addListener(() {
+      final page = _pageController.page?.round() ?? 0;
+      if (page != _currentPage) setState(() => _currentPage = page);
+    });
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadImage() async {
@@ -42,43 +53,23 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
     });
   }
 
-  void _selectTemplate(ShareTemplate template) {
-    setState(() {
-      _config = _config.copyWith(
-        titlePosition: template.titlePosition,
-        showTitle: template.showTitle,
-      );
-    });
-  }
-
-  void _resetFraming() {
-    setState(() => _config = _config.copyWith(zoom: ShareCardConfig.minZoom, pan: Offset.zero));
-  }
-
-  void _onScaleStart(ScaleStartDetails details) => _startZoom = _config.zoom;
-
-  void _onScaleUpdate(ScaleUpdateDetails details, Size cardSize) {
-    if (_image == null) return;
-    final newZoom =
-        (_startZoom * details.scale).clamp(ShareCardConfig.minZoom, ShareCardConfig.maxZoom);
-    final dx = details.focalPointDelta.dx / cardSize.width;
-    final dy = details.focalPointDelta.dy / cardSize.height;
-    setState(() {
-      _config = _config.copyWith(
-        zoom: newZoom,
-        pan: Offset(
-          (_config.pan.dx - dx * 2).clamp(-1.0, 1.0),
-          (_config.pan.dy - dy * 2).clamp(-1.0, 1.0),
-        ),
-      );
-    });
+  double _currentPageOffset() {
+    if (_pageController.hasClients && _pageController.position.haveDimensions) {
+      return _pageController.page ?? _currentPage.toDouble();
+    }
+    return _currentPage.toDouble();
   }
 
   Future<void> _share() async {
     setState(() => _sharing = true);
     try {
+      final template = shareTemplates[_currentPage];
+      final config = ShareCardConfig(
+        titlePosition: template.titlePosition,
+        showTitle: template.showTitle,
+      );
       final notifier = ref.read(newsNotifierProvider.notifier);
-      final png = await notifier.composeShareCard(widget.article, _image, _config);
+      final png = await notifier.composeShareCard(widget.article, _image, config);
       await notifier.shareComposedCard(widget.article, png);
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
@@ -95,106 +86,43 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accent = sourceAccent(widget.article.sourceId);
-    final isFramable = _image != null;
-    final canReset = _config.zoom != ShareCardConfig.minZoom || _config.pan != Offset.zero;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Share preview')),
+      appBar: AppBar(title: const Text('Choose a template')),
       body: SafeArea(
         child: Column(
           children: [
+            const SizedBox(height: 8),
             Expanded(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: AspectRatio(
-                    aspectRatio: ShareCardRenderer.aspectRatio,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: _loadingImage
-                          ? ColoredBox(
-                              color: accent.withValues(alpha: 0.15),
-                              child: const Center(child: CircularProgressIndicator()),
-                            )
-                          : LayoutBuilder(
-                              builder: (context, constraints) {
-                                final cardSize = constraints.biggest;
-                                return GestureDetector(
-                                  onScaleStart: isFramable ? _onScaleStart : null,
-                                  onScaleUpdate:
-                                      isFramable ? (d) => _onScaleUpdate(d, cardSize) : null,
-                                  child: Stack(
-                                    children: [
-                                      Positioned.fill(
-                                        child: CustomPaint(
-                                          painter: _ShareCardPainter(
-                                            image: _image,
-                                            accentColor: accent,
-                                            title: widget.article.title,
-                                            metaText:
-                                                '${widget.article.sourceName} · ${relativeTime(widget.article.pubDate)}',
-                                            category: widget.article.category,
-                                            config: _config,
-                                          ),
-                                        ),
-                                      ),
-                                      if (canReset)
-                                        Positioned(
-                                          top: 8,
-                                          right: 8,
-                                          child: _ResetButton(onTap: _resetFraming),
-                                        ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
+              child: _loadingImage
+                  ? Center(child: CircularProgressIndicator(color: accent))
+                  : PageView.builder(
+                      controller: _pageController,
+                      itemCount: shareTemplates.length,
+                      itemBuilder: (context, index) => _buildCard(index, accent),
                     ),
-                  ),
-                ),
-              ),
             ),
-            if (_image != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  'Drag to reposition · pinch to zoom',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Show title', style: theme.textTheme.titleSmall),
-                  Switch(
-                    value: _config.showTitle,
-                    onChanged: (value) => setState(() => _config = _config.copyWith(showTitle: value)),
+            const SizedBox(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(shareTemplates.length, (index) {
+                final selected = index == _currentPage;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: selected ? 20 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: selected ? accent : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(3),
                   ),
-                ],
-              ),
+                );
+              }),
             ),
-            SizedBox(
-              height: 88,
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                scrollDirection: Axis.horizontal,
-                itemCount: shareTemplates.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  final template = shareTemplates[index];
-                  final selected = template.titlePosition == _config.titlePosition &&
-                      template.showTitle == _config.showTitle;
-                  return _TemplateChip(
-                    template: template,
-                    selected: selected,
-                    accent: accent,
-                    onTap: () => _selectTemplate(template),
-                  );
-                },
-              ),
+            const SizedBox(height: 10),
+            Text(
+              shareTemplates[_currentPage].label,
+              style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -207,12 +135,56 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
                     : const Icon(Icons.ios_share_rounded, size: 18),
-                label: Text(_sharing ? 'Sharing…' : 'Share'),
+                label: Text(_sharing ? 'Sharing…' : 'Share this template'),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildCard(int index, Color accent) {
+    final template = shareTemplates[index];
+    final card = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      child: AspectRatio(
+        aspectRatio: ShareCardRenderer.aspectRatio,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: SizedBox.expand(
+            child: CustomPaint(
+              painter: _ShareCardPainter(
+                image: _image,
+                accentColor: accent,
+                title: widget.article.title,
+                metaText: '${widget.article.sourceName} · ${relativeTime(widget.article.pubDate)}',
+                category: widget.article.category,
+                config: ShareCardConfig(
+                  titlePosition: template.titlePosition,
+                  showTitle: template.showTitle,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return AnimatedBuilder(
+      animation: _pageController,
+      builder: (context, child) {
+        final diff = (index - _currentPageOffset()).abs().clamp(0.0, 1.0);
+        final scale = 1 - diff * 0.12;
+        final opacity = 1 - diff * 0.45;
+        return Center(
+          child: Opacity(
+            opacity: opacity,
+            child: Transform.scale(scale: scale, child: child),
+          ),
+        );
+      },
+      child: card,
     );
   }
 }
@@ -250,82 +222,4 @@ class _ShareCardPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ShareCardPainter oldDelegate) => true;
-}
-
-class _ResetButton extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _ResetButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.black.withValues(alpha: 0.45),
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: const Padding(
-          padding: EdgeInsets.all(8),
-          child: Icon(Icons.refresh_rounded, size: 18, color: Colors.white),
-        ),
-      ),
-    );
-  }
-}
-
-class _TemplateChip extends StatelessWidget {
-  final ShareTemplate template;
-  final bool selected;
-  final Color accent;
-  final VoidCallback onTap;
-
-  const _TemplateChip({
-    required this.template,
-    required this.selected,
-    required this.accent,
-    required this.onTap,
-  });
-
-  IconData get _icon => switch (template.id) {
-        'news_card' => Icons.newspaper_rounded,
-        'bottom' => Icons.vertical_align_bottom_rounded,
-        'top' => Icons.vertical_align_top_rounded,
-        'left' => Icons.format_align_left_rounded,
-        'right' => Icons.format_align_right_rounded,
-        'center' => Icons.format_align_center_rounded,
-        _ => Icons.image_outlined,
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        width: 76,
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? accent.withValues(alpha: 0.15) : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? accent : Colors.transparent, width: 1.5),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(_icon, size: 22, color: selected ? accent : theme.colorScheme.onSurfaceVariant),
-            const SizedBox(height: 6),
-            Text(
-              template.label,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: selected ? accent : theme.colorScheme.onSurfaceVariant,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

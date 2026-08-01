@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/painting.dart' show Canvas, Rect, Size;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -65,21 +66,43 @@ class ShareDataSource {
     return byteData!.buffer.asUint8List();
   }
 
-  /// Writes the composed card to the temp cache and opens the native share
-  /// sheet with it attached, alongside the title and link as text.
+  /// Opens the native share sheet with the composed card attached,
+  /// alongside the title and link as text. On native platforms the card is
+  /// written to the temp cache first (and reused if shared again); the web
+  /// has no filesystem to cache into, so there [pngBytes] is attached
+  /// directly.
   Future<void> shareComposedCard(ArticleModel article, Uint8List pngBytes) async {
-    final dir = await _cacheDir();
-    await _pruneOldFiles(dir);
-    final path = '${dir.path}/${article.id}_card.png';
-    await File(path).writeAsBytes(pngBytes);
+    final fileName = '${article.id}_card.png';
+    final file = kIsWeb
+        ? XFile.fromData(pngBytes, name: fileName, mimeType: 'image/png')
+        : await _writeToCache(fileName, pngBytes);
 
     await SharePlus.instance.share(
-      ShareParams(text: '${article.title}\n${article.link}', files: [XFile(path)]),
+      ShareParams(text: '${article.title}\n${article.link}', files: [file]),
     );
+  }
+
+  Future<XFile> _writeToCache(String fileName, Uint8List bytes) async {
+    final dir = await _cacheDir();
+    await _pruneOldFiles(dir);
+    final path = '${dir.path}/$fileName';
+    await File(path).writeAsBytes(bytes);
+    return XFile(path);
   }
 
   Future<Uint8List?> _downloadImage(String? imageUrl) async {
     if (imageUrl == null) return null;
+
+    // The web has no filesystem to cache into, so just fetch fresh each time.
+    if (kIsWeb) {
+      try {
+        final response =
+            await _client.get(Uri.parse(imageUrl)).timeout(const Duration(seconds: 15));
+        return response.statusCode == 200 ? response.bodyBytes : null;
+      } catch (_) {
+        return null;
+      }
+    }
 
     final dir = await _cacheDir();
     final path = '${dir.path}/${_hash(imageUrl)}${_extensionFor(imageUrl)}';
