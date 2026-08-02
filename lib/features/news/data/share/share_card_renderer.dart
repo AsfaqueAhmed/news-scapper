@@ -287,8 +287,8 @@ class ShareCardRenderer {
   /// instead), the same way the reference templates keep a logo/handle
   /// watermark no matter how photo-forward the design is.
   static void _drawBrandMark(Canvas canvas, Rect bounds, Color accentColor, ui.Image? logo) {
-    const size = 64.0;
-    const margin = 36.0;
+    const size = 88.0;
+    const margin = 32.0;
     final center = Offset(bounds.right - margin - size / 2, bounds.top + margin + size / 2);
     _drawCircularLogo(canvas, center, size / 2, logo, fallbackColor: accentColor);
   }
