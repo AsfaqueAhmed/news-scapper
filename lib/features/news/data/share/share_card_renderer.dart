@@ -17,10 +17,11 @@ class ShareCardConfig {
   /// article source's own accent color.
   final Color? paletteColor;
 
-  /// Whether the ribbon template's "BREAKING NEWS" banner box is drawn.
-  /// Ignored by every other [titlePosition] -- the headline/photo/meta
-  /// layout never depends on it.
-  final bool showRibbonBadge;
+  /// Whether the "BREAKING NEWS"/category badge is drawn -- the ribbon
+  /// template's banner box, or the card template's tag pill. Ignored by
+  /// every other [titlePosition]; the headline/photo/meta layout never
+  /// depends on it.
+  final bool showBadge;
 
   /// 1.0 = default cover crop, larger zooms in on the photo.
   final double zoom;
@@ -32,7 +33,7 @@ class ShareCardConfig {
     this.titlePosition = TitlePosition.ribbon,
     this.showTitle = true,
     this.paletteColor,
-    this.showRibbonBadge = true,
+    this.showBadge = true,
     this.zoom = 1.0,
     this.pan = Offset.zero,
   });
@@ -44,7 +45,7 @@ class ShareCardConfig {
     TitlePosition? titlePosition,
     bool? showTitle,
     Color? paletteColor,
-    bool? showRibbonBadge,
+    bool? showBadge,
     double? zoom,
     Offset? pan,
   }) {
@@ -52,7 +53,7 @@ class ShareCardConfig {
       titlePosition: titlePosition ?? this.titlePosition,
       showTitle: showTitle ?? this.showTitle,
       paletteColor: paletteColor ?? this.paletteColor,
-      showRibbonBadge: showRibbonBadge ?? this.showRibbonBadge,
+      showBadge: showBadge ?? this.showBadge,
       zoom: zoom ?? this.zoom,
       pan: pan ?? this.pan,
     );
@@ -129,9 +130,10 @@ class ShareCardRenderer {
       switch (config.titlePosition) {
         case TitlePosition.ribbon:
           _drawRibbon(canvas, bounds, title, metaText, category, palette,
-              hasImage: hasImage, showBadge: config.showRibbonBadge);
+              hasImage: hasImage, showBadge: config.showBadge);
         case TitlePosition.card:
-          _drawCard(canvas, bounds, title, description, metaText, category, palette);
+          _drawCard(canvas, bounds, title, description, metaText, category, palette,
+              showBadge: config.showBadge);
         case TitlePosition.panel:
           _drawPanel(canvas, bounds, title, metaText, category, palette);
         case TitlePosition.spotlight:
@@ -292,11 +294,10 @@ class ShareCardRenderer {
   }
 
   /// A white editorial card overlapping the bottom of the photo: colored
-  /// tag, bold black headline, a short description, gray meta line -- plus
-  /// an outlined category pill over the photo itself when the article has
-  /// a category. The card's height tracks exactly how much its content
-  /// needs (title and description each cap at a few lines), rather than a
-  /// fixed fraction of the photo.
+  /// category tag (hidden when [showBadge] is false), bold black headline,
+  /// a short description, gray meta line. The card's height tracks exactly
+  /// how much its content needs (title and description each cap at a few
+  /// lines), rather than a fixed fraction of the photo.
   static void _drawCard(
     Canvas canvas,
     Rect bounds,
@@ -304,8 +305,9 @@ class ShareCardRenderer {
     String? description,
     String metaText,
     String? category,
-    Color tagColor,
-  ) {
+    Color tagColor, {
+    required bool showBadge,
+  }) {
     const padding = 48.0;
     const topInset = 30.0;
     const afterTagGap = 20.0;
@@ -314,14 +316,18 @@ class ShareCardRenderer {
     const bottomInset = 40.0;
     final maxTextWidth = bounds.width - padding * 2;
 
-    final tagPainter = TextPainter(
-      text: TextSpan(
-        text: (category ?? 'Breaking News').toUpperCase(),
-        style: const TextStyle(color: _white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 0.6),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final tagBoxHeight = tagPainter.height + 16;
+    TextPainter? tagPainter;
+    double tagBoxHeight = 0;
+    if (showBadge) {
+      tagPainter = TextPainter(
+        text: TextSpan(
+          text: (category ?? 'Breaking News').toUpperCase(),
+          style: const TextStyle(color: _white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tagBoxHeight = tagPainter.height + 16;
+    }
 
     final titlePainter = TextPainter(
       text: TextSpan(
@@ -354,7 +360,11 @@ class ShareCardRenderer {
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: maxTextWidth);
 
-    var contentHeight = topInset + tagBoxHeight + afterTagGap + titlePainter.height;
+    var contentHeight = topInset;
+    if (showBadge) {
+      contentHeight += tagBoxHeight + afterTagGap;
+    }
+    contentHeight += titlePainter.height;
     if (descriptionPainter != null) {
       contentHeight += afterTitleGap + descriptionPainter.height;
     }
@@ -378,11 +388,13 @@ class ShareCardRenderer {
       Paint()..color = _white,
     );
 
-    final tagRect = Rect.fromLTWH(cardRect.left + padding, cardRect.top + topInset, tagPainter.width + 28, tagBoxHeight);
-    canvas.drawRRect(RRect.fromRectAndRadius(tagRect, const Radius.circular(6)), Paint()..color = tagColor);
-    tagPainter.paint(canvas, Offset(tagRect.left + 14, tagRect.top + 8));
-
-    var cursorY = tagRect.bottom + afterTagGap;
+    var cursorY = cardRect.top + topInset;
+    if (showBadge && tagPainter != null) {
+      final tagRect = Rect.fromLTWH(cardRect.left + padding, cursorY, tagPainter.width + 28, tagBoxHeight);
+      canvas.drawRRect(RRect.fromRectAndRadius(tagRect, const Radius.circular(6)), Paint()..color = tagColor);
+      tagPainter.paint(canvas, Offset(tagRect.left + 14, tagRect.top + 8));
+      cursorY = tagRect.bottom + afterTagGap;
+    }
     titlePainter.paint(canvas, Offset(cardRect.left + padding, cursorY));
     cursorY += titlePainter.height;
 

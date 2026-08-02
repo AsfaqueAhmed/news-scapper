@@ -30,7 +30,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
   bool _sharing = false;
   int _currentPage = 0;
   _ViewMode _viewMode = _ViewMode.carousel;
-  bool _showBreakingBadge = true;
+  bool _showBadge = true;
 
   @override
   void initState() {
@@ -90,7 +90,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
     return ShareCardConfig(
       titlePosition: template.titlePosition,
       showTitle: template.showTitle,
-      showRibbonBadge: _showBreakingBadge,
+      showBadge: _showBadge,
     );
   }
 
@@ -164,7 +164,8 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
               shareTemplates[_currentPage].label,
               style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
-            if (shareTemplates[_currentPage].titlePosition == TitlePosition.ribbon)
+            if (const {TitlePosition.ribbon, TitlePosition.card}
+                .contains(shareTemplates[_currentPage].titlePosition))
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Row(
@@ -175,9 +176,9 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
                       style: theme.textTheme.bodyMedium,
                     ),
                     Switch(
-                      value: _showBreakingBadge,
+                      value: _showBadge,
                       activeThumbColor: accent,
-                      onChanged: (value) => setState(() => _showBreakingBadge = value),
+                      onChanged: (value) => setState(() => _showBadge = value),
                     ),
                   ],
                 ),
