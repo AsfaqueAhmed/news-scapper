@@ -9,8 +9,10 @@ import '../../data/share/share_card_renderer.dart';
 import '../../domain/entities/article.dart';
 import '../state/news_providers.dart';
 
-/// Lets the user swipe through ready-made share templates and share
-/// whichever one is centered.
+enum _ViewMode { carousel, grid }
+
+/// Lets the user browse ready-made share templates -- as a swipeable
+/// carousel or a scannable grid -- and share whichever one is selected.
 class SharePreviewScreen extends ConsumerStatefulWidget {
   final Article article;
 
@@ -21,21 +23,28 @@ class SharePreviewScreen extends ConsumerStatefulWidget {
 }
 
 class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
-  final _pageController = PageController(viewportFraction: 0.82);
+  late PageController _pageController;
 
   ui.Image? _image;
   bool _loadingImage = true;
   bool _sharing = false;
   int _currentPage = 0;
+  _ViewMode _viewMode = _ViewMode.carousel;
 
   @override
   void initState() {
     super.initState();
     _loadImage();
-    _pageController.addListener(() {
-      final page = _pageController.page?.round() ?? 0;
+    _pageController = _newPageController(_currentPage);
+  }
+
+  PageController _newPageController(int initialPage) {
+    final controller = PageController(viewportFraction: 0.82, initialPage: initialPage);
+    controller.addListener(() {
+      final page = controller.page?.round() ?? 0;
       if (page != _currentPage) setState(() => _currentPage = page);
     });
+    return controller;
   }
 
   @override
@@ -58,6 +67,22 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
       return _pageController.page ?? _currentPage.toDouble();
     }
     return _currentPage.toDouble();
+  }
+
+  void _toggleViewMode() {
+    setState(() {
+      if (_viewMode == _ViewMode.carousel) {
+        _viewMode = _ViewMode.grid;
+      } else {
+        _viewMode = _ViewMode.carousel;
+        _pageController.dispose();
+        _pageController = _newPageController(_currentPage);
+      }
+    });
+  }
+
+  void _selectTemplate(int index) {
+    setState(() => _currentPage = index);
   }
 
   Future<void> _share() async {
@@ -86,9 +111,19 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accent = sourceAccent(widget.article.sourceId);
+    final isGrid = _viewMode == _ViewMode.grid;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Choose a template')),
+      appBar: AppBar(
+        title: const Text('Choose a template'),
+        actions: [
+          IconButton(
+            icon: Icon(isGrid ? Icons.view_carousel_rounded : Icons.grid_view_rounded),
+            tooltip: isGrid ? 'Switch to carousel view' : 'Switch to grid view',
+            onPressed: _loadingImage ? null : _toggleViewMode,
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -96,29 +131,28 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
             Expanded(
               child: _loadingImage
                   ? Center(child: CircularProgressIndicator(color: accent))
-                  : PageView.builder(
-                      controller: _pageController,
-                      itemCount: shareTemplates.length,
-                      itemBuilder: (context, index) => _buildCard(index, accent),
-                    ),
+                  : isGrid
+                      ? _buildGrid(accent)
+                      : _buildCarousel(accent),
             ),
             const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(shareTemplates.length, (index) {
-                final selected = index == _currentPage;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: selected ? 20 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: selected ? accent : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                );
-              }),
-            ),
+            if (!isGrid)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(shareTemplates.length, (index) {
+                  final selected = index == _currentPage;
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    width: selected ? 20 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: selected ? accent : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  );
+                }),
+              ),
             const SizedBox(height: 10),
             Text(
               shareTemplates[_currentPage].label,
@@ -144,31 +178,18 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
     );
   }
 
-  Widget _buildCard(int index, Color accent) {
-    final template = shareTemplates[index];
+  Widget _buildCarousel(Color accent) {
+    return PageView.builder(
+      controller: _pageController,
+      itemCount: shareTemplates.length,
+      itemBuilder: (context, index) => _buildCarouselCard(index, accent),
+    );
+  }
+
+  Widget _buildCarouselCard(int index, Color accent) {
     final card = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-      child: AspectRatio(
-        aspectRatio: ShareCardRenderer.aspectRatio,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: SizedBox.expand(
-            child: CustomPaint(
-              painter: _ShareCardPainter(
-                image: _image,
-                accentColor: accent,
-                title: widget.article.title,
-                metaText: '${widget.article.sourceName} · ${relativeTime(widget.article.pubDate)}',
-                category: widget.article.category,
-                config: ShareCardConfig(
-                  titlePosition: template.titlePosition,
-                  showTitle: template.showTitle,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
+      child: _templateCard(index, accent),
     );
 
     return AnimatedBuilder(
@@ -185,6 +206,79 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
         );
       },
       child: card,
+    );
+  }
+
+  Widget _buildGrid(Color accent) {
+    return GridView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 16,
+        crossAxisSpacing: 16,
+        childAspectRatio: 0.82,
+      ),
+      itemCount: shareTemplates.length,
+      itemBuilder: (context, index) {
+        final selected = index == _currentPage;
+        return GestureDetector(
+          onTap: () => _selectTemplate(index),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: selected ? accent : Colors.transparent,
+                      width: 3,
+                    ),
+                  ),
+                  child: _templateCard(index, accent),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                shareTemplates[index].label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: selected ? accent : Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _templateCard(int index, Color accent) {
+    final template = shareTemplates[index];
+    return AspectRatio(
+      aspectRatio: ShareCardRenderer.aspectRatio,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: SizedBox.expand(
+          child: CustomPaint(
+            painter: _ShareCardPainter(
+              image: _image,
+              accentColor: accent,
+              title: widget.article.title,
+              metaText: '${widget.article.sourceName} · ${relativeTime(widget.article.pubDate)}',
+              category: widget.article.category,
+              config: ShareCardConfig(
+                titlePosition: template.titlePosition,
+                showTitle: template.showTitle,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
