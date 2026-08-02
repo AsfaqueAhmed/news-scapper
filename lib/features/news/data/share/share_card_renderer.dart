@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 /// Which designed layout the card uses. Ignored when
 /// [ShareCardConfig.showTitle] is false (photo only, no overlay at all).
@@ -103,10 +104,27 @@ class ShareCardRenderer {
   static const double height = 1080;
   static const double aspectRatio = 1.0;
 
+  static const _brandLogoAssetPath = 'assets/branding/flashbangla_logo.png';
+  static Future<ui.Image>? _brandLogoFuture;
+
+  /// Loads (and caches) the brand logo used in the corner mark. Callers
+  /// await this once before painting, since [paint] itself is synchronous.
+  static Future<ui.Image> loadBrandLogo() {
+    return _brandLogoFuture ??= _decodeAsset(_brandLogoAssetPath);
+  }
+
+  static Future<ui.Image> _decodeAsset(String assetPath) async {
+    final data = await rootBundle.load(assetPath);
+    final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+    final frame = await codec.getNextFrame();
+    return frame.image;
+  }
+
   static void paint(
     Canvas canvas,
     Size canvasSize, {
     required ui.Image? image,
+    required ui.Image? logo,
     required Color accentColor,
     required String title,
     String? description,
@@ -143,7 +161,7 @@ class ShareCardRenderer {
       }
     }
 
-    _drawBrandMark(canvas, bounds, palette);
+    _drawBrandMark(canvas, bounds, palette, logo);
 
     canvas.restore();
   }
@@ -182,12 +200,37 @@ class ShareCardRenderer {
 
   /// Small circular brand mark, top-right -- every template keeps this, the
   /// same way the reference templates keep a logo/handle watermark no
-  /// matter how photo-forward the design is.
-  static void _drawBrandMark(Canvas canvas, Rect bounds, Color accentColor) {
+  /// matter how photo-forward the design is. Draws the FlashBangla logo
+  /// once it's loaded; falls back to a plain "F" mark before then.
+  static void _drawBrandMark(Canvas canvas, Rect bounds, Color accentColor, ui.Image? logo) {
     const size = 64.0;
     const margin = 36.0;
     final center = Offset(bounds.right - margin - size / 2, bounds.top + margin + size / 2);
-    canvas.drawCircle(center, size / 2, Paint()..color = accentColor);
+    final circleRect = Rect.fromCircle(center: center, radius: size / 2);
+
+    if (logo != null) {
+      canvas.save();
+      canvas.clipPath(Path()..addOval(circleRect));
+      final logoSize = logo.width < logo.height ? logo.width.toDouble() : logo.height.toDouble();
+      final src = Rect.fromCenter(
+        center: Offset(logo.width / 2, logo.height / 2),
+        width: logoSize,
+        height: logoSize,
+      );
+      canvas.drawImageRect(logo, src, circleRect, Paint());
+      canvas.restore();
+    } else {
+      canvas.drawCircle(center, size / 2, Paint()..color = accentColor);
+      final mark = TextPainter(
+        text: const TextSpan(
+          text: 'F',
+          style: TextStyle(color: _white, fontSize: 30, fontWeight: FontWeight.w900),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      mark.paint(canvas, Offset(center.dx - mark.width / 2, center.dy - mark.height / 2 - 1));
+    }
+
     canvas.drawCircle(
       center,
       size / 2,
@@ -196,14 +239,6 @@ class ShareCardRenderer {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.5,
     );
-    final mark = TextPainter(
-      text: const TextSpan(
-        text: 'F',
-        style: TextStyle(color: _white, fontSize: 30, fontWeight: FontWeight.w900),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    mark.paint(canvas, Offset(center.dx - mark.width / 2, center.dy - mark.height / 2 - 1));
   }
 
   static void _drawBottomScrim(Canvas canvas, Rect bounds, {required bool hasImage}) {

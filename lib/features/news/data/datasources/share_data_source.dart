@@ -47,12 +47,14 @@ class ShareDataSource {
     ui.Image? image,
     ShareCardConfig config,
   ) async {
+    final logo = await ShareCardRenderer.loadBrandLogo();
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, ShareCardRenderer.width, ShareCardRenderer.height));
     ShareCardRenderer.paint(
       canvas,
       const Size(ShareCardRenderer.width, ShareCardRenderer.height),
       image: image,
+      logo: logo,
       accentColor: sourceAccent(article.sourceId),
       title: article.title,
       description: article.description,

@@ -26,6 +26,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
   late PageController _pageController;
 
   ui.Image? _image;
+  ui.Image? _logo;
   bool _loadingImage = true;
   bool _sharing = false;
   int _currentPage = 0;
@@ -35,7 +36,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
   @override
   void initState() {
     super.initState();
-    _loadImage();
+    _loadAssets();
     _pageController = _newPageController(_currentPage);
   }
 
@@ -54,11 +55,15 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
     super.dispose();
   }
 
-  Future<void> _loadImage() async {
-    final image = await ref.read(newsNotifierProvider.notifier).loadShareImage(widget.article);
+  Future<void> _loadAssets() async {
+    final imageFuture = ref.read(newsNotifierProvider.notifier).loadShareImage(widget.article);
+    final logoFuture = ShareCardRenderer.loadBrandLogo();
+    final image = await imageFuture;
+    final logo = await logoFuture;
     if (!mounted) return;
     setState(() {
       _image = image;
+      _logo = logo;
       _loadingImage = false;
     });
   }
@@ -292,6 +297,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
           child: CustomPaint(
             painter: _ShareCardPainter(
               image: _image,
+              logo: _logo,
               accentColor: accent,
               title: widget.article.title,
               description: widget.article.description,
@@ -308,6 +314,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
 
 class _ShareCardPainter extends CustomPainter {
   final ui.Image? image;
+  final ui.Image? logo;
   final Color accentColor;
   final String title;
   final String? description;
@@ -317,6 +324,7 @@ class _ShareCardPainter extends CustomPainter {
 
   _ShareCardPainter({
     required this.image,
+    required this.logo,
     required this.accentColor,
     required this.title,
     required this.description,
@@ -331,6 +339,7 @@ class _ShareCardPainter extends CustomPainter {
       canvas,
       size,
       image: image,
+      logo: logo,
       accentColor: accentColor,
       title: title,
       description: description,
