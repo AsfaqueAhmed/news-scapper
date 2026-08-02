@@ -171,8 +171,13 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
               shareTemplates[_currentPage].label,
               style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
-            if (const {TitlePosition.ribbon, TitlePosition.card, TitlePosition.panel}
-                .contains(shareTemplates[_currentPage].titlePosition))
+            if (const {
+              TitlePosition.ribbon,
+              TitlePosition.card,
+              TitlePosition.panel,
+              TitlePosition.boxedHeadline,
+              TitlePosition.updatePill,
+            }.contains(shareTemplates[_currentPage].titlePosition))
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Row(

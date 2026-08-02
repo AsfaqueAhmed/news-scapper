@@ -123,6 +123,8 @@ const List<ShareTemplate> shareTemplates = [
     paletteColor: _alertYellow,
     bannerShape: BannerShape.pill,
   ),
+  ShareTemplate(id: 'boxed_headline', label: 'Impact', titlePosition: TitlePosition.boxedHeadline, paletteColor: _breakingRed),
+  ShareTemplate(id: 'update_pill', label: 'Update', titlePosition: TitlePosition.updatePill, paletteColor: _breakingRed),
 ];
 
 /// Renders the share card -- a square social template with the article
@@ -190,9 +192,11 @@ class ShareCardRenderer {
         case TitlePosition.minimal:
           _drawMinimal(canvas, bounds, title, metaText, hasImage: hasImage);
         case TitlePosition.boxedHeadline:
-          break; // added in Task 2
+          _drawBoxedHeadline(canvas, bounds, title, description, metaText, category, palette,
+              hasImage: hasImage, showBadge: config.showBadge);
         case TitlePosition.updatePill:
-          break; // added in Task 2
+          _drawUpdatePill(canvas, bounds, title, metaText, category, palette,
+              hasImage: hasImage, showBadge: config.showBadge);
         case TitlePosition.highlight:
           break; // added in Task 3
       }
@@ -600,6 +604,134 @@ class ShareCardRenderer {
 
     cursorY += afterDescriptionGap;
     metaPainter.paint(canvas, Offset(bandRect.left + padding, cursorY));
+  }
+
+  /// A solid-color rounded box floating over the lower photo (inset from
+  /// both edges, unlike [_drawPanel]'s edge-to-edge band), sized to fit
+  /// just the headline. A dark badge pill sits above it on the photo; an
+  /// optional 2-line description and the meta line sit below it, also
+  /// directly on the photo over a bottom scrim.
+  static void _drawBoxedHeadline(
+    Canvas canvas,
+    Rect bounds,
+    String title,
+    String? description,
+    String metaText,
+    String? category,
+    Color boxColor, {
+    required bool hasImage,
+    required bool showBadge,
+  }) {
+    _drawBottomScrim(canvas, bounds, hasImage: hasImage);
+
+    const padding = 48.0;
+    const boxPadding = 32.0;
+    const afterBoxGap = 20.0;
+    const afterDescriptionGap = 14.0;
+    const bottomInset = 40.0;
+    final maxWidth = bounds.width - padding * 2;
+    final maxBoxTextWidth = maxWidth - boxPadding * 2;
+
+    if (showBadge) {
+      _drawPill(canvas, category ?? 'Breaking News', _nearBlack, anchor: Offset(padding, 64), centered: false);
+    }
+
+    final titlePainter = TextPainter(
+      text: TextSpan(
+        text: title,
+        style: const TextStyle(color: _white, fontSize: 42, fontWeight: FontWeight.w800, height: 1.18),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 3,
+      ellipsis: '…',
+    )..layout(maxWidth: maxBoxTextWidth);
+    final boxHeight = titlePainter.height + boxPadding * 2;
+
+    TextPainter? descriptionPainter;
+    if (description != null && description.isNotEmpty) {
+      descriptionPainter = TextPainter(
+        text: TextSpan(
+          text: description,
+          style: TextStyle(color: _white.withValues(alpha: 0.85), fontSize: 24, fontWeight: FontWeight.w500, height: 1.3),
+        ),
+        textDirection: TextDirection.ltr,
+        maxLines: 2,
+        ellipsis: '…',
+      )..layout(maxWidth: maxWidth);
+    }
+
+    final metaPainter = TextPainter(
+      text: TextSpan(
+        text: metaText,
+        style: TextStyle(color: _white.withValues(alpha: 0.85), fontSize: 24, fontWeight: FontWeight.w600),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+
+    var stackHeight = boxHeight + afterBoxGap;
+    if (descriptionPainter != null) {
+      stackHeight += descriptionPainter.height + afterDescriptionGap;
+    }
+    stackHeight += metaPainter.height;
+
+    var cursorY = bounds.bottom - bottomInset - stackHeight;
+    final boxRect = Rect.fromLTWH(padding, cursorY, maxWidth, boxHeight);
+    canvas.drawRRect(RRect.fromRectAndRadius(boxRect, const Radius.circular(20)), Paint()..color = boxColor);
+    titlePainter.paint(canvas, Offset(boxRect.left + boxPadding, boxRect.top + boxPadding));
+    cursorY = boxRect.bottom + afterBoxGap;
+
+    if (descriptionPainter != null) {
+      descriptionPainter.paint(canvas, Offset(padding, cursorY));
+      cursorY += descriptionPainter.height + afterDescriptionGap;
+    }
+    metaPainter.paint(canvas, Offset(padding, cursorY));
+  }
+
+  /// A pill badge centered in the upper-middle of the photo, with the bold
+  /// headline and meta line left-aligned below it over a bottom scrim. No
+  /// description -- keeps this layout visually distinct from the other
+  /// description-using templates.
+  static void _drawUpdatePill(
+    Canvas canvas,
+    Rect bounds,
+    String title,
+    String metaText,
+    String? category,
+    Color pillColor, {
+    required bool hasImage,
+    required bool showBadge,
+  }) {
+    _drawBottomScrim(canvas, bounds, hasImage: hasImage);
+
+    if (showBadge) {
+      _drawPill(canvas, category ?? 'News Update', pillColor,
+          anchor: Offset(bounds.center.dx, bounds.top + bounds.height * 0.3), centered: true);
+    }
+
+    const padding = 48.0;
+    final maxWidth = bounds.width - padding * 2;
+    final titlePainter = TextPainter(
+      text: TextSpan(
+        text: title,
+        style: const TextStyle(color: _white, fontSize: 44, fontWeight: FontWeight.w800, height: 1.18),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 4,
+      ellipsis: '…',
+    )..layout(maxWidth: maxWidth);
+
+    final metaPainter = TextPainter(
+      text: TextSpan(
+        text: metaText,
+        style: TextStyle(color: _white.withValues(alpha: 0.85), fontSize: 24, fontWeight: FontWeight.w600),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+
+    final metaOffset = Offset(padding, bounds.bottom - padding - metaPainter.height);
+    final titleOffset = Offset(padding, metaOffset.dy - 16 - titlePainter.height);
+    titlePainter.paint(canvas, titleOffset);
+    metaPainter.paint(canvas, metaOffset);
   }
 
   /// Full dark overlay with a centered category pill, headline, and meta --
