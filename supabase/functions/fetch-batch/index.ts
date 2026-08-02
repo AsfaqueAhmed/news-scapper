@@ -405,7 +405,14 @@ Deno.serve(async (req: Request) => {
     // existing rows keep whatever is_read they had.
     const rows = deduped.map(({ is_read: _is_read, ...rest }) => rest);
     const { error: upsertError } = await supabase.from("articles").upsert(rows);
-    if (upsertError) errors.push(`upsert: ${upsertError.message}`);
+    if (upsertError) {
+      errors.push(`upsert: ${upsertError.message}`);
+    } else {
+      // Bump the app's realtime sync counter -- but only when something
+      // actually landed, so idle cron ticks don't trigger client reloads.
+      const { error: bumpError } = await supabase.rpc("bump_sync_version");
+      if (bumpError) errors.push(`sync bump: ${bumpError.message}`);
+    }
   }
 
   let enrichedCount = 0;

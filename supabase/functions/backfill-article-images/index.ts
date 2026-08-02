@@ -221,6 +221,13 @@ Deno.serve(async (req: Request) => {
     if (logError) errors.push(`fetch_log insert: ${logError.message}`);
   }
 
+  if (imagesFound > 0) {
+    // Bump the app's realtime sync counter -- but only when something
+    // actually landed, so idle cron ticks don't trigger client reloads.
+    const { error: bumpError } = await supabase.rpc("bump_sync_version");
+    if (bumpError) errors.push(`sync bump: ${bumpError.message}`);
+  }
+
   return new Response(
     JSON.stringify({
       runId,
