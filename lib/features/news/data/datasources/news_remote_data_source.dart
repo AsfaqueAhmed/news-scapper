@@ -118,14 +118,57 @@ class NewsRemoteDataSource {
     }
   }
 
+  static final _rfc822Pattern = RegExp(
+    r'^(?:[A-Za-z]{3,},\s*)?(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s*(.*)$',
+  );
+
+  static const _monthAbbreviations = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+  };
+
+  static const _timezoneAbbreviationOffsets = {
+    'GMT': 0, 'UTC': 0, 'UT': 0,
+    'EST': -300, 'EDT': -240,
+    'CST': -360, 'CDT': -300,
+    'MST': -420, 'MDT': -360,
+    'PST': -480, 'PDT': -420,
+  };
+
+  /// [DateTime.parse] only understands ISO 8601, but RSS `pubDate`/Atom
+  /// `updated` fields are almost always RFC 822/1123 (e.g. "Tue, 05 Aug
+  /// 2025 10:00:00 GMT" or "+0600"), which Dart's core parser rejects
+  /// outright -- so this fell back to [DateTime.now] for nearly every real
+  /// feed, silently corrupting publish dates on every refresh. Parsed by
+  /// hand instead of relying on [DateTime.parse]/[DateTime.tryParse] again.
   DateTime? _parseRfc822(String raw) {
-    // Best-effort RFC 822 fallback (e.g. "Tue, 05 Aug 2025 10:00:00 GMT").
-    try {
-      final cleaned = raw.replaceAll(RegExp(r'\s+GMT$'), ' +0000');
-      return DateTime.tryParse(cleaned);
-    } catch (_) {
+    final match = _rfc822Pattern.firstMatch(raw.trim());
+    if (match == null) return null;
+
+    final day = int.tryParse(match.group(1)!);
+    final month = _monthAbbreviations[match.group(2)!.substring(0, 3).toLowerCase()];
+    final year = int.tryParse(match.group(3)!);
+    final hour = int.tryParse(match.group(4)!);
+    final minute = int.tryParse(match.group(5)!);
+    final second = int.tryParse(match.group(6)!);
+    if (day == null || month == null || year == null || hour == null || minute == null || second == null) {
       return null;
     }
+
+    final offsetMinutes = _parseTimezoneOffset(match.group(7)!.trim());
+    return DateTime.utc(year, month, day, hour, minute, second).subtract(Duration(minutes: offsetMinutes));
+  }
+
+  int _parseTimezoneOffset(String zone) {
+    if (zone.isEmpty) return 0;
+    final numeric = RegExp(r'^([+-])(\d{2})(\d{2})$').firstMatch(zone);
+    if (numeric != null) {
+      final sign = numeric.group(1) == '-' ? -1 : 1;
+      final hours = int.parse(numeric.group(2)!);
+      final minutes = int.parse(numeric.group(3)!);
+      return sign * (hours * 60 + minutes);
+    }
+    return _timezoneAbbreviationOffsets[zone.toUpperCase()] ?? 0;
   }
 
   String? _stripHtml(String? html) {
