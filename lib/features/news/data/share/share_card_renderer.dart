@@ -108,6 +108,7 @@ class ShareCardRenderer {
     required ui.Image? image,
     required Color accentColor,
     required String title,
+    String? description,
     required String metaText,
     String? category,
     required ShareCardConfig config,
@@ -130,7 +131,7 @@ class ShareCardRenderer {
           _drawRibbon(canvas, bounds, title, metaText, category, palette,
               hasImage: hasImage, showBadge: config.showRibbonBadge);
         case TitlePosition.card:
-          _drawCard(canvas, bounds, title, metaText, category, palette);
+          _drawCard(canvas, bounds, title, description, metaText, category, palette);
         case TitlePosition.panel:
           _drawPanel(canvas, bounds, title, metaText, category, palette);
         case TitlePosition.spotlight:
@@ -291,18 +292,75 @@ class ShareCardRenderer {
   }
 
   /// A white editorial card overlapping the bottom of the photo: colored
-  /// tag, bold black headline, gray meta line -- plus an outlined category
-  /// pill over the photo itself when the article has a category.
+  /// tag, bold black headline, a short description, gray meta line -- plus
+  /// an outlined category pill over the photo itself when the article has
+  /// a category. The card's height tracks exactly how much its content
+  /// needs (title and description each cap at a few lines), rather than a
+  /// fixed fraction of the photo.
   static void _drawCard(
     Canvas canvas,
     Rect bounds,
     String title,
+    String? description,
     String metaText,
     String? category,
     Color tagColor,
   ) {
     const padding = 48.0;
-    final cardTop = bounds.top + bounds.height * 0.56;
+    const topInset = 30.0;
+    const afterTagGap = 20.0;
+    const afterTitleGap = 16.0;
+    const afterDescriptionGap = 14.0;
+    const bottomInset = 40.0;
+    final maxTextWidth = bounds.width - padding * 2;
+
+    final tagPainter = TextPainter(
+      text: TextSpan(
+        text: (category ?? 'Breaking News').toUpperCase(),
+        style: const TextStyle(color: _white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final tagBoxHeight = tagPainter.height + 16;
+
+    final titlePainter = TextPainter(
+      text: TextSpan(
+        text: title,
+        style: const TextStyle(color: _nearBlack, fontSize: 42, fontWeight: FontWeight.w800, height: 1.18),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 3,
+      ellipsis: '…',
+    )..layout(maxWidth: maxTextWidth);
+
+    TextPainter? descriptionPainter;
+    if (description != null && description.isNotEmpty) {
+      descriptionPainter = TextPainter(
+        text: TextSpan(
+          text: description,
+          style: const TextStyle(color: Color(0xFF4A4A4A), fontSize: 26, fontWeight: FontWeight.w500, height: 1.32),
+        ),
+        textDirection: TextDirection.ltr,
+        maxLines: 3,
+        ellipsis: '…',
+      )..layout(maxWidth: maxTextWidth);
+    }
+
+    final metaPainter = TextPainter(
+      text: TextSpan(
+        text: metaText,
+        style: const TextStyle(color: Color(0xFF6B6B6B), fontSize: 22, fontWeight: FontWeight.w600),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxTextWidth);
+
+    var contentHeight = topInset + tagBoxHeight + afterTagGap + titlePainter.height;
+    if (descriptionPainter != null) {
+      contentHeight += afterTitleGap + descriptionPainter.height;
+    }
+    contentHeight += afterDescriptionGap + metaPainter.height + bottomInset;
+
+    final cardTop = bounds.bottom - contentHeight;
     final cardRect = Rect.fromLTWH(bounds.left, cardTop, bounds.width, bounds.bottom - cardTop);
 
     canvas.drawRect(
@@ -320,49 +378,22 @@ class ShareCardRenderer {
       Paint()..color = _white,
     );
 
-    final tagPainter = TextPainter(
-      text: TextSpan(
-        text: (category ?? 'Breaking News').toUpperCase(),
-        style: const TextStyle(color: _white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 0.6),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    final tagRect = Rect.fromLTWH(
-      cardRect.left + padding,
-      cardRect.top + 30,
-      tagPainter.width + 28,
-      tagPainter.height + 16,
-    );
+    final tagRect = Rect.fromLTWH(cardRect.left + padding, cardRect.top + topInset, tagPainter.width + 28, tagBoxHeight);
     canvas.drawRRect(RRect.fromRectAndRadius(tagRect, const Radius.circular(6)), Paint()..color = tagColor);
     tagPainter.paint(canvas, Offset(tagRect.left + 14, tagRect.top + 8));
 
-    final maxTextWidth = cardRect.width - padding * 2;
-    final titlePainter = TextPainter(
-      text: TextSpan(
-        text: title,
-        style: const TextStyle(color: _nearBlack, fontSize: 42, fontWeight: FontWeight.w800, height: 1.18),
-      ),
-      textDirection: TextDirection.ltr,
-      maxLines: 3,
-      ellipsis: '…',
-    )..layout(maxWidth: maxTextWidth);
-    final titleOffset = Offset(cardRect.left + padding, tagRect.bottom + 20);
-    titlePainter.paint(canvas, titleOffset);
+    var cursorY = tagRect.bottom + afterTagGap;
+    titlePainter.paint(canvas, Offset(cardRect.left + padding, cursorY));
+    cursorY += titlePainter.height;
 
-    final metaPainter = TextPainter(
-      text: TextSpan(
-        text: metaText,
-        style: const TextStyle(color: Color(0xFF6B6B6B), fontSize: 22, fontWeight: FontWeight.w600),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: maxTextWidth);
-    final metaOffset = Offset(cardRect.left + padding, cardRect.bottom - 40 - metaPainter.height);
-    final safeMetaOffset =
-        Offset(metaOffset.dx, metaOffset.dy < titleOffset.dy + titlePainter.height + 12
-            ? titleOffset.dy + titlePainter.height + 12
-            : metaOffset.dy);
-    metaPainter.paint(canvas, safeMetaOffset);
+    if (descriptionPainter != null) {
+      cursorY += afterTitleGap;
+      descriptionPainter.paint(canvas, Offset(cardRect.left + padding, cursorY));
+      cursorY += descriptionPainter.height;
+    }
+
+    cursorY += afterDescriptionGap;
+    metaPainter.paint(canvas, Offset(cardRect.left + padding, cursorY));
   }
 
   /// A solid color block across the bottom third -- headline and meta sit

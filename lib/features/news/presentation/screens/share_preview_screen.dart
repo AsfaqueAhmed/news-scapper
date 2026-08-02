@@ -293,6 +293,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
               image: _image,
               accentColor: accent,
               title: widget.article.title,
+              description: widget.article.description,
               metaText: '${widget.article.sourceName} · ${relativeTime(widget.article.pubDate)}',
               category: widget.article.category,
               config: _configFor(template),
@@ -308,6 +309,7 @@ class _ShareCardPainter extends CustomPainter {
   final ui.Image? image;
   final Color accentColor;
   final String title;
+  final String? description;
   final String metaText;
   final String? category;
   final ShareCardConfig config;
@@ -316,6 +318,7 @@ class _ShareCardPainter extends CustomPainter {
     required this.image,
     required this.accentColor,
     required this.title,
+    required this.description,
     required this.metaText,
     required this.category,
     required this.config,
@@ -329,6 +332,7 @@ class _ShareCardPainter extends CustomPainter {
       image: image,
       accentColor: accentColor,
       title: title,
+      description: description,
       metaText: metaText,
       category: category,
       config: config,

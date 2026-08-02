@@ -55,6 +55,7 @@ class ShareDataSource {
       image: image,
       accentColor: sourceAccent(article.sourceId),
       title: article.title,
+      description: article.description,
       metaText: '${article.sourceName} · ${relativeTime(article.pubDate)}',
       category: article.category,
       config: config,

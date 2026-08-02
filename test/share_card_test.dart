@@ -24,6 +24,8 @@ void main() {
       final article = ArticleModel(
         id: 'a',
         title: 'Flood warnings issued as heavy rain batters Dhaka and surrounding districts',
+        description: 'Officials are urging residents in low-lying areas to move to higher '
+            'ground as rivers approach danger levels following three days of continuous rainfall.',
         link: 'https://example.com/a',
         pubDate: DateTime.now(),
         sourceId: 'bbc',
