@@ -125,6 +125,7 @@ const List<ShareTemplate> shareTemplates = [
   ),
   ShareTemplate(id: 'boxed_headline', label: 'Impact', titlePosition: TitlePosition.boxedHeadline, paletteColor: _breakingRed),
   ShareTemplate(id: 'update_pill', label: 'Update', titlePosition: TitlePosition.updatePill, paletteColor: _breakingRed),
+  ShareTemplate(id: 'highlight', label: 'Highlight', titlePosition: TitlePosition.highlight, paletteColor: _breakingRed),
 ];
 
 /// Renders the share card -- a square social template with the article
@@ -198,11 +199,13 @@ class ShareCardRenderer {
           _drawUpdatePill(canvas, bounds, title, metaText, category, palette,
               hasImage: hasImage, showBadge: config.showBadge);
         case TitlePosition.highlight:
-          break; // added in Task 3
+          _drawHighlight(canvas, bounds, title, description, metaText, palette, logo, hasImage: hasImage);
       }
     }
 
-    _drawBrandMark(canvas, bounds, palette, logo);
+    if (config.titlePosition != TitlePosition.highlight) {
+      _drawBrandMark(canvas, bounds, palette, logo);
+    }
 
     canvas.restore();
   }
@@ -732,6 +735,99 @@ class ShareCardRenderer {
     final titleOffset = Offset(padding, metaOffset.dy - 16 - titlePainter.height);
     titlePainter.paint(canvas, titleOffset);
     metaPainter.paint(canvas, metaOffset);
+  }
+
+  /// Full-bleed photo, no category badge: the headline is drawn with a
+  /// colored "highlighter" bar behind each wrapped line (via
+  /// [TextPainter.computeLineMetrics]), followed by an optional
+  /// description and the meta line. Instead of the usual small top-right
+  /// corner mark, the actual logo is shown large and centered at the
+  /// bottom -- [ShareCardRenderer.paint] skips the corner mark for this
+  /// [TitlePosition] to avoid showing the logo twice.
+  static void _drawHighlight(
+    Canvas canvas,
+    Rect bounds,
+    String title,
+    String? description,
+    String metaText,
+    Color highlightColor,
+    ui.Image? logo, {
+    required bool hasImage,
+  }) {
+    _drawBottomScrim(canvas, bounds, hasImage: hasImage);
+
+    const padding = 48.0;
+    const logoSize = 90.0;
+    const afterTitleGap = 16.0;
+    const afterDescriptionGap = 16.0;
+    const beforeLogoGap = 28.0;
+    const bottomInset = 44.0;
+    final maxWidth = bounds.width - padding * 2;
+
+    final titlePainter = TextPainter(
+      text: TextSpan(
+        text: title,
+        style: const TextStyle(color: _white, fontSize: 46, fontWeight: FontWeight.w800, height: 1.3),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 4,
+      ellipsis: '…',
+    )..layout(maxWidth: maxWidth);
+
+    TextPainter? descriptionPainter;
+    if (description != null && description.isNotEmpty) {
+      descriptionPainter = TextPainter(
+        text: TextSpan(
+          text: description,
+          style: TextStyle(color: _white.withValues(alpha: 0.85), fontSize: 26, fontWeight: FontWeight.w500, height: 1.32),
+        ),
+        textDirection: TextDirection.ltr,
+        maxLines: 3,
+        ellipsis: '…',
+      )..layout(maxWidth: maxWidth);
+    }
+
+    final metaPainter = TextPainter(
+      text: TextSpan(
+        text: metaText,
+        style: TextStyle(color: _white.withValues(alpha: 0.7), fontSize: 22, fontWeight: FontWeight.w600),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: maxWidth);
+
+    var stackHeight = titlePainter.height;
+    if (descriptionPainter != null) {
+      stackHeight += afterTitleGap + descriptionPainter.height;
+    }
+    stackHeight += afterDescriptionGap + metaPainter.height + beforeLogoGap + logoSize + bottomInset;
+
+    var cursorY = bounds.bottom - stackHeight;
+
+    for (final line in titlePainter.computeLineMetrics()) {
+      final lineTop = line.baseline - line.ascent;
+      final lineRect = Rect.fromLTWH(
+        padding + line.left - 10,
+        cursorY + lineTop + 4,
+        line.width + 20,
+        line.height - 6,
+      );
+      canvas.drawRect(lineRect, Paint()..color = highlightColor);
+    }
+    titlePainter.paint(canvas, Offset(padding, cursorY));
+    cursorY += titlePainter.height;
+
+    if (descriptionPainter != null) {
+      cursorY += afterTitleGap;
+      descriptionPainter.paint(canvas, Offset(padding, cursorY));
+      cursorY += descriptionPainter.height;
+    }
+
+    cursorY += afterDescriptionGap;
+    metaPainter.paint(canvas, Offset(padding, cursorY));
+    cursorY += metaPainter.height + beforeLogoGap;
+
+    final logoCenter = Offset(bounds.center.dx, cursorY + logoSize / 2);
+    _drawCircularLogo(canvas, logoCenter, logoSize / 2, logo, fallbackColor: highlightColor);
   }
 
   /// Full dark overlay with a centered category pill, headline, and meta --
