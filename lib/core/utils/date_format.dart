@@ -1,3 +1,5 @@
+import 'package:intl/intl.dart';
+
 String relativeTime(DateTime? time) {
   if (time == null) return 'Never';
   final diff = DateTime.now().difference(time);
@@ -13,3 +15,8 @@ String relativeTime(DateTime? time) {
   final d = diff.inDays;
   return '$d day${d == 1 ? '' : 's'} ago';
 }
+
+/// Absolute post date for share-card meta lines, e.g. "Aug 2, 2026" --
+/// unlike [relativeTime], this doesn't change as time passes after the
+/// card is shared.
+String postDate(DateTime time) => DateFormat('MMM d, y').format(time);

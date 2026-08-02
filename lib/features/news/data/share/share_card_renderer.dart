@@ -5,7 +5,11 @@ import 'package:flutter/services.dart' show rootBundle;
 
 /// Which designed layout the card uses. Ignored when
 /// [ShareCardConfig.showTitle] is false (photo only, no overlay at all).
-enum TitlePosition { ribbon, card, panel, spotlight, minimal }
+enum TitlePosition { ribbon, card, panel, spotlight, minimal, boxedHeadline, updatePill, highlight }
+
+/// Shape of the ribbon template's badge -- the classic diagonal-cut notch,
+/// or a plain rounded pill (used by e.g. "Special Report" and "Alert").
+enum BannerShape { notch, pill }
 
 /// User-adjustable state for the share card editor: which template layout
 /// is active (or whether it's shown at all) and how the photo is framed.
@@ -24,6 +28,10 @@ class ShareCardConfig {
   /// depends on it.
   final bool showBadge;
 
+  /// Shape of the ribbon template's badge. Ignored by every other
+  /// [titlePosition].
+  final BannerShape bannerShape;
+
   /// 1.0 = default cover crop, larger zooms in on the photo.
   final double zoom;
 
@@ -35,6 +43,7 @@ class ShareCardConfig {
     this.showTitle = true,
     this.paletteColor,
     this.showBadge = true,
+    this.bannerShape = BannerShape.notch,
     this.zoom = 1.0,
     this.pan = Offset.zero,
   });
@@ -47,6 +56,7 @@ class ShareCardConfig {
     bool? showTitle,
     Color? paletteColor,
     bool? showBadge,
+    BannerShape? bannerShape,
     double? zoom,
     Offset? pan,
   }) {
@@ -55,6 +65,7 @@ class ShareCardConfig {
       showTitle: showTitle ?? this.showTitle,
       paletteColor: paletteColor ?? this.paletteColor,
       showBadge: showBadge ?? this.showBadge,
+      bannerShape: bannerShape ?? this.bannerShape,
       zoom: zoom ?? this.zoom,
       pan: pan ?? this.pan,
     );
@@ -67,6 +78,7 @@ class ShareTemplate {
   final TitlePosition titlePosition;
   final bool showTitle;
   final Color? paletteColor;
+  final BannerShape bannerShape;
 
   const ShareTemplate({
     required this.id,
@@ -74,12 +86,15 @@ class ShareTemplate {
     required this.titlePosition,
     this.showTitle = true,
     this.paletteColor,
+    this.bannerShape = BannerShape.notch,
   });
 }
 
 const _white = Color(0xFFFFFFFF);
 const _nearBlack = Color(0xFF15151A);
 const _breakingRed = Color(0xFFE0272B);
+const _khaki = Color(0xFFC7B693);
+const _alertYellow = Color(0xFFE8B923);
 
 /// Kept intentionally short -- more templates (and their palette colors)
 /// get added back here over time.
@@ -92,6 +107,21 @@ const List<ShareTemplate> shareTemplates = [
     label: 'Photo only',
     titlePosition: TitlePosition.minimal,
     showTitle: false,
+  ),
+  ShareTemplate(id: 'panel_khaki', label: 'Field Report', titlePosition: TitlePosition.panel, paletteColor: _khaki),
+  ShareTemplate(
+    id: 'ribbon_pill_red',
+    label: 'Special Report',
+    titlePosition: TitlePosition.ribbon,
+    paletteColor: _breakingRed,
+    bannerShape: BannerShape.pill,
+  ),
+  ShareTemplate(
+    id: 'ribbon_pill_yellow',
+    label: 'Alert',
+    titlePosition: TitlePosition.ribbon,
+    paletteColor: _alertYellow,
+    bannerShape: BannerShape.pill,
   ),
 ];
 
@@ -148,16 +178,23 @@ class ShareCardRenderer {
       switch (config.titlePosition) {
         case TitlePosition.ribbon:
           _drawRibbon(canvas, bounds, title, metaText, category, palette,
-              hasImage: hasImage, showBadge: config.showBadge);
+              hasImage: hasImage, showBadge: config.showBadge, bannerShape: config.bannerShape);
         case TitlePosition.card:
           _drawCard(canvas, bounds, title, description, metaText, category, palette,
               showBadge: config.showBadge);
         case TitlePosition.panel:
-          _drawPanel(canvas, bounds, title, metaText, category, palette);
+          _drawPanel(canvas, bounds, title, description, metaText, category, palette,
+              showBadge: config.showBadge);
         case TitlePosition.spotlight:
           _drawSpotlight(canvas, bounds, title, metaText, category, palette, hasImage: hasImage);
         case TitlePosition.minimal:
           _drawMinimal(canvas, bounds, title, metaText, hasImage: hasImage);
+        case TitlePosition.boxedHeadline:
+          break; // added in Task 2
+        case TitlePosition.updatePill:
+          break; // added in Task 2
+        case TitlePosition.highlight:
+          break; // added in Task 3
       }
     }
 
@@ -198,15 +235,12 @@ class ShareCardRenderer {
     canvas.drawImageRect(image, src, bounds, Paint());
   }
 
-  /// Small circular brand mark, top-right -- every template keeps this, the
-  /// same way the reference templates keep a logo/handle watermark no
-  /// matter how photo-forward the design is. Draws the FlashBangla logo
-  /// once it's loaded; falls back to a plain "F" mark before then.
-  static void _drawBrandMark(Canvas canvas, Rect bounds, Color accentColor, ui.Image? logo) {
-    const size = 64.0;
-    const margin = 36.0;
-    final center = Offset(bounds.right - margin - size / 2, bounds.top + margin + size / 2);
-    final circleRect = Rect.fromCircle(center: center, radius: size / 2);
+  /// Draws [logo] clipped to a circle at [center]/[radius] plus a white
+  /// stroke ring; falls back to a colored circle with a plain "F" mark if
+  /// [logo] is null (e.g. briefly, before it's loaded).
+  static void _drawCircularLogo(Canvas canvas, Offset center, double radius, ui.Image? logo,
+      {required Color fallbackColor}) {
+    final circleRect = Rect.fromCircle(center: center, radius: radius);
 
     if (logo != null) {
       canvas.save();
@@ -220,7 +254,7 @@ class ShareCardRenderer {
       canvas.drawImageRect(logo, src, circleRect, Paint());
       canvas.restore();
     } else {
-      canvas.drawCircle(center, size / 2, Paint()..color = accentColor);
+      canvas.drawCircle(center, radius, Paint()..color = fallbackColor);
       final mark = TextPainter(
         text: const TextSpan(
           text: 'F',
@@ -233,12 +267,49 @@ class ShareCardRenderer {
 
     canvas.drawCircle(
       center,
-      size / 2,
+      radius,
       Paint()
         ..color = _white.withValues(alpha: 0.7)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.5,
     );
+  }
+
+  /// Small circular brand mark, top-right -- every template keeps this
+  /// (except [TitlePosition.highlight], which draws its own large logo
+  /// instead), the same way the reference templates keep a logo/handle
+  /// watermark no matter how photo-forward the design is.
+  static void _drawBrandMark(Canvas canvas, Rect bounds, Color accentColor, ui.Image? logo) {
+    const size = 64.0;
+    const margin = 36.0;
+    final center = Offset(bounds.right - margin - size / 2, bounds.top + margin + size / 2);
+    _drawCircularLogo(canvas, center, size / 2, logo, fallbackColor: accentColor);
+  }
+
+  /// Draws a filled, fully-rounded pill with a bold white uppercase label,
+  /// anchored either top-left at [anchor] or centered on it. Returns the
+  /// drawn rect so callers can lay out content relative to it.
+  static Rect _drawPill(Canvas canvas, String label, Color color, {required Offset anchor, required bool centered}) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: label.toUpperCase(),
+        style: const TextStyle(color: _white, fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    const padH = 26.0;
+    const padV = 14.0;
+    final w = painter.width + padH * 2;
+    final h = painter.height + padV * 2;
+    final rect =
+        centered ? Rect.fromCenter(center: anchor, width: w, height: h) : Rect.fromLTWH(anchor.dx, anchor.dy, w, h);
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(h / 2));
+
+    canvas.drawShadow(Path()..addRRect(rrect), _nearBlack, 6, false);
+    canvas.drawRRect(rrect, Paint()..color = color);
+    painter.paint(canvas, Offset(rect.left + padH, rect.top + padV));
+    return rect;
   }
 
   static void _drawBottomScrim(Canvas canvas, Rect bounds, {required bool hasImage}) {
@@ -254,9 +325,9 @@ class ShareCardRenderer {
     );
   }
 
-  /// A diagonal-cut "BREAKING NEWS" ribbon overlapping the photo, plus a
-  /// bold headline over a bottom scrim -- the classic breaking-news social
-  /// template look.
+  /// A "BREAKING NEWS" banner overlapping the photo -- either the classic
+  /// diagonal-cut notch, or a plain rounded pill -- plus a bold headline
+  /// over a bottom scrim.
   static void _drawRibbon(
     Canvas canvas,
     Rect bounds,
@@ -266,43 +337,48 @@ class ShareCardRenderer {
     Color bannerColor, {
     required bool hasImage,
     required bool showBadge,
+    required BannerShape bannerShape,
   }) {
     _drawBottomScrim(canvas, bounds, hasImage: hasImage);
+    const padding = 48.0;
+    const top = 64.0;
 
     if (showBadge) {
-      final label = (category ?? 'Breaking News').toUpperCase();
-      final labelPainter = TextPainter(
-        text: TextSpan(
-          text: label,
-          style: const TextStyle(
-            color: _white,
-            fontSize: 26,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1,
+      final label = category ?? 'Breaking News';
+      if (bannerShape == BannerShape.pill) {
+        _drawPill(canvas, label, bannerColor, anchor: Offset(bounds.left + padding, top), centered: false);
+      } else {
+        final labelPainter = TextPainter(
+          text: TextSpan(
+            text: label.toUpperCase(),
+            style: const TextStyle(
+              color: _white,
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1,
+            ),
           ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
+          textDirection: TextDirection.ltr,
+        )..layout();
 
-      const padH = 30.0;
-      const padV = 16.0;
-      const notch = 22.0;
-      final bannerWidth = labelPainter.width + padH * 2 + notch;
-      final bannerHeight = labelPainter.height + padV * 2;
-      const top = 64.0;
+        const padH = 30.0;
+        const padV = 16.0;
+        const notch = 22.0;
+        final bannerWidth = labelPainter.width + padH * 2 + notch;
+        final bannerHeight = labelPainter.height + padV * 2;
 
-      final path = Path()
-        ..moveTo(bounds.left, top)
-        ..lineTo(bounds.left + bannerWidth, top)
-        ..lineTo(bounds.left + bannerWidth - notch, top + bannerHeight)
-        ..lineTo(bounds.left, top + bannerHeight)
-        ..close();
-      canvas.drawShadow(path, _nearBlack, 6, false);
-      canvas.drawPath(path, Paint()..color = bannerColor);
-      labelPainter.paint(canvas, Offset(bounds.left + padH, top + padV));
+        final path = Path()
+          ..moveTo(bounds.left, top)
+          ..lineTo(bounds.left + bannerWidth, top)
+          ..lineTo(bounds.left + bannerWidth - notch, top + bannerHeight)
+          ..lineTo(bounds.left, top + bannerHeight)
+          ..close();
+        canvas.drawShadow(path, _nearBlack, 6, false);
+        canvas.drawPath(path, Paint()..color = bannerColor);
+        labelPainter.paint(canvas, Offset(bounds.left + padH, top + padV));
+      }
     }
 
-    const padding = 48.0;
     final maxWidth = bounds.width - padding * 2;
     final titlePainter = TextPainter(
       text: TextSpan(
@@ -443,42 +519,29 @@ class ShareCardRenderer {
     metaPainter.paint(canvas, Offset(cardRect.left + padding, cursorY));
   }
 
-  /// A solid color block across the bottom third -- headline and meta sit
-  /// directly on flat color rather than over the photo, mirroring the
-  /// flat-color deck cards in the reference templates.
+  /// A solid color block at the bottom -- headline and description sit
+  /// directly on flat color rather than over the photo. When [showBadge]
+  /// is true, a dark badge pill floats over the photo above the block
+  /// (independent of the block's own color, so it stays legible no matter
+  /// which palette color the block uses). The block's height tracks its
+  /// content, same technique as [_drawCard].
   static void _drawPanel(
     Canvas canvas,
     Rect bounds,
     String title,
+    String? description,
     String metaText,
     String? category,
-    Color accentColor,
-  ) {
-    final bandHeight = bounds.height * 0.36;
-    final bandRect = Rect.fromLTWH(bounds.left, bounds.bottom - bandHeight, bounds.width, bandHeight);
-    canvas.drawRect(bandRect, Paint()..color = accentColor);
-
-    final textColor = accentColor.computeLuminance() > 0.5 ? _nearBlack : _white;
+    Color accentColor, {
+    required bool showBadge,
+  }) {
     const padding = 48.0;
-    final maxWidth = bandRect.width - padding * 2;
-    double cursorY = bandRect.top + 36;
-
-    if (category != null && category.isNotEmpty) {
-      final tagPainter = TextPainter(
-        text: TextSpan(
-          text: category.toUpperCase(),
-          style: TextStyle(
-            color: textColor.withValues(alpha: 0.85),
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: maxWidth);
-      tagPainter.paint(canvas, Offset(bandRect.left + padding, cursorY));
-      cursorY += tagPainter.height + 14;
-    }
+    const topInset = 36.0;
+    const afterTitleGap = 14.0;
+    const afterDescriptionGap = 14.0;
+    const bottomInset = 40.0;
+    final maxWidth = bounds.width - padding * 2;
+    final textColor = accentColor.computeLuminance() > 0.5 ? _nearBlack : _white;
 
     final titlePainter = TextPainter(
       text: TextSpan(
@@ -489,7 +552,19 @@ class ShareCardRenderer {
       maxLines: 3,
       ellipsis: '…',
     )..layout(maxWidth: maxWidth);
-    titlePainter.paint(canvas, Offset(bandRect.left + padding, cursorY));
+
+    TextPainter? descriptionPainter;
+    if (description != null && description.isNotEmpty) {
+      descriptionPainter = TextPainter(
+        text: TextSpan(
+          text: description,
+          style: TextStyle(color: textColor.withValues(alpha: 0.85), fontSize: 24, fontWeight: FontWeight.w500, height: 1.3),
+        ),
+        textDirection: TextDirection.ltr,
+        maxLines: 3,
+        ellipsis: '…',
+      )..layout(maxWidth: maxWidth);
+    }
 
     final metaPainter = TextPainter(
       text: TextSpan(
@@ -498,10 +573,33 @@ class ShareCardRenderer {
       ),
       textDirection: TextDirection.ltr,
     )..layout(maxWidth: maxWidth);
-    metaPainter.paint(
-      canvas,
-      Offset(bandRect.left + padding, bandRect.bottom - padding - metaPainter.height),
-    );
+
+    var bandHeight = topInset + titlePainter.height;
+    if (descriptionPainter != null) {
+      bandHeight += afterTitleGap + descriptionPainter.height;
+    }
+    bandHeight += afterDescriptionGap + metaPainter.height + bottomInset;
+
+    final bandRect = Rect.fromLTWH(bounds.left, bounds.bottom - bandHeight, bounds.width, bandHeight);
+    canvas.drawRect(bandRect, Paint()..color = accentColor);
+
+    if (showBadge) {
+      _drawPill(canvas, category ?? 'Breaking News', _nearBlack.withValues(alpha: 0.85),
+          anchor: Offset(bounds.left + padding, 64), centered: false);
+    }
+
+    var cursorY = bandRect.top + topInset;
+    titlePainter.paint(canvas, Offset(bandRect.left + padding, cursorY));
+    cursorY += titlePainter.height;
+
+    if (descriptionPainter != null) {
+      cursorY += afterTitleGap;
+      descriptionPainter.paint(canvas, Offset(bandRect.left + padding, cursorY));
+      cursorY += descriptionPainter.height;
+    }
+
+    cursorY += afterDescriptionGap;
+    metaPainter.paint(canvas, Offset(bandRect.left + padding, cursorY));
   }
 
   /// Full dark overlay with a centered category pill, headline, and meta --

@@ -95,7 +95,9 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
     return ShareCardConfig(
       titlePosition: template.titlePosition,
       showTitle: template.showTitle,
+      paletteColor: template.paletteColor,
       showBadge: _showBadge,
+      bannerShape: template.bannerShape,
     );
   }
 
@@ -169,7 +171,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
               shareTemplates[_currentPage].label,
               style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
-            if (const {TitlePosition.ribbon, TitlePosition.card}
+            if (const {TitlePosition.ribbon, TitlePosition.card, TitlePosition.panel}
                 .contains(shareTemplates[_currentPage].titlePosition))
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -301,7 +303,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
               accentColor: accent,
               title: widget.article.title,
               description: widget.article.description,
-              metaText: '${widget.article.sourceName} · ${relativeTime(widget.article.pubDate)}',
+              metaText: '${widget.article.sourceName} · ${postDate(widget.article.pubDate)}',
               category: widget.article.category,
               config: _configFor(template),
             ),
