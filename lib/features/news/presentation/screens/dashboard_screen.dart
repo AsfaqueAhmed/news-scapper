@@ -32,9 +32,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final settingsNotifier = ref.read(settingsNotifierProvider.notifier);
     final newsNotifier = ref.read(newsNotifierProvider.notifier);
     if (!ref.read(settingsNotifierProvider).loaded) await settingsNotifier.load();
-    await newsNotifier.loadFromCache();
+    final settings = ref.read(settingsNotifierProvider);
+    await newsNotifier.loadFromCache(sources: settings.enabledSources);
+    newsNotifier.startListeningForUpdates(sources: settings.enabledSources);
     if (!mounted) return;
-    setState(() => _syncTabs(ref.read(settingsNotifierProvider)));
+    setState(() => _syncTabs(settings));
     if (ref.read(newsNotifierProvider).lastScrapedAt == null) {
       _refresh();
     }

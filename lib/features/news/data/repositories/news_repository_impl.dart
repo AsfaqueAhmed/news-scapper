@@ -37,8 +37,10 @@ class NewsRepositoryImpl implements NewsRepository {
   );
 
   @override
-  Future<CachedNews> getCachedNews() async {
-    final articles = await _supabaseDataSource.getArticles();
+  Future<CachedNews> getCachedNews({required List<NewsSource> sources}) async {
+    final articles = await _supabaseDataSource.getLatestPerSource(
+      sources.map((s) => s.id).toList(),
+    );
     final lastScrapedAt = await _prefsDataSource.getLastScrapedAt();
     final lastShared = await _prefsDataSource.getLastShared();
     return CachedNews(
@@ -98,7 +100,9 @@ class NewsRepositoryImpl implements NewsRepository {
 
     await _supabaseDataSource.pruneOlderThan(const Duration(days: 14));
 
-    final articles = await _supabaseDataSource.getArticles();
+    final articles = await _supabaseDataSource.getLatestPerSource(
+      sources.map((s) => s.id).toList(),
+    );
     final scrapedAt = DateTime.now();
     await _prefsDataSource.setLastScrapedAt(scrapedAt);
 
@@ -121,4 +125,8 @@ class NewsRepositoryImpl implements NewsRepository {
     await _shareDataSource.shareComposedCard(ArticleModel.fromEntity(article), pngBytes);
     await _prefsDataSource.setLastShared(DateTime.now(), article.title);
   }
+
+  @override
+  void subscribeToUpdates(void Function() onChanged) =>
+      _supabaseDataSource.subscribeToSyncUpdates(onChanged);
 }

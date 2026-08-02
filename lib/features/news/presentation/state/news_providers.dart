@@ -15,6 +15,7 @@ import '../../domain/usecases/load_share_image_usecase.dart';
 import '../../domain/usecases/mark_article_read_usecase.dart';
 import '../../domain/usecases/refresh_articles_usecase.dart';
 import '../../domain/usecases/share_composed_card_usecase.dart';
+import '../../domain/usecases/subscribe_to_updates_usecase.dart';
 import 'news_notifier.dart';
 import 'news_state.dart';
 
@@ -73,6 +74,10 @@ final shareComposedCardUseCaseProvider = Provider<ShareComposedCardUseCase>(
 
 final groupSiblingsUseCaseProvider =
     Provider<GroupSiblingsUseCase>((ref) => GroupSiblingsUseCase());
+
+final subscribeToUpdatesUseCaseProvider = Provider<SubscribeToUpdatesUseCase>(
+  (ref) => SubscribeToUpdatesUseCase(ref.watch(newsRepositoryProvider)),
+);
 
 final newsNotifierProvider =
     NotifierProvider<NewsNotifier, NewsState>(NewsNotifier.new);

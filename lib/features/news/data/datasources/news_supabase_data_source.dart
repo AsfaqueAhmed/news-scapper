@@ -44,6 +44,20 @@ class NewsSupabaseDataSource {
     return rows.map(ArticleModel.fromMap).toList();
   }
 
+  /// Latest [perSource] articles from EACH of [sourceIds], merged and
+  /// sorted by publish date. Used instead of a single global-cap query so
+  /// every enabled source is represented -- a source with fewer/older
+  /// articles no longer gets crowded out of the list by higher-volume or
+  /// higher-frequency sources.
+  Future<List<ArticleModel>> getLatestPerSource(List<String> sourceIds, {int perSource = 6}) async {
+    final results = await Future.wait(
+      sourceIds.map((id) => getArticles(sourceId: id, limit: perSource)),
+    );
+    final merged = results.expand((rows) => rows).toList()
+      ..sort((a, b) => b.pubDate.compareTo(a.pubDate));
+    return merged;
+  }
+
   Future<List<ArticleModel>> getArticlesByGroup(String groupId) async {
     final rows = await _client
         .from('articles')
@@ -56,5 +70,19 @@ class NewsSupabaseDataSource {
   Future<void> pruneOlderThan(Duration age) async {
     final cutoff = DateTime.now().subtract(age).toIso8601String();
     await _client.from('articles').delete().lt('pub_date', cutoff);
+  }
+
+  /// Subscribes to the `sync_state` counter that the fetch-batch and
+  /// backfill-article-images edge functions bump after a run that
+  /// actually changed something. Calls [onChanged] on every update. Not
+  /// idempotent -- callers must guard against subscribing more than once
+  /// (see `NewsNotifier.startListeningForUpdates`).
+  void subscribeToSyncUpdates(void Function() onChanged) {
+    _client.channel('sync_state_changes').onPostgresChanges(
+      event: PostgresChangeEvent.update,
+      schema: 'public',
+      table: 'sync_state',
+      callback: (_) => onChanged(),
+    ).subscribe();
   }
 }

@@ -13,6 +13,7 @@ import '../../domain/usecases/load_share_image_usecase.dart';
 import '../../domain/usecases/mark_article_read_usecase.dart';
 import '../../domain/usecases/refresh_articles_usecase.dart';
 import '../../domain/usecases/share_composed_card_usecase.dart';
+import '../../domain/usecases/subscribe_to_updates_usecase.dart';
 import 'news_providers.dart';
 import 'news_state.dart';
 
@@ -24,6 +25,9 @@ class NewsNotifier extends Notifier<NewsState> {
   late final ComposeShareCardUseCase _composeShareCard;
   late final ShareComposedCardUseCase _shareComposedCard;
   late final GroupSiblingsUseCase _groupSiblings;
+  late final SubscribeToUpdatesUseCase _subscribeToUpdates;
+
+  bool _listeningForUpdates = false;
 
   @override
   NewsState build() {
@@ -34,19 +38,30 @@ class NewsNotifier extends Notifier<NewsState> {
     _composeShareCard = ref.watch(composeShareCardUseCaseProvider);
     _shareComposedCard = ref.watch(shareComposedCardUseCaseProvider);
     _groupSiblings = ref.watch(groupSiblingsUseCaseProvider);
+    _subscribeToUpdates = ref.watch(subscribeToUpdatesUseCaseProvider);
     return const NewsState();
   }
 
   List<Article> groupSiblings(Article article) =>
       _groupSiblings(state.articles, article);
 
-  Future<void> loadFromCache() async {
-    final cached = await _getCachedArticles();
+  Future<void> loadFromCache({required List<NewsSource> sources}) async {
+    final cached = await _getCachedArticles(sources: sources);
     state = state.copyWith(
       articles: cached.articles,
       lastScrapedAt: cached.lastScrapedAt,
       lastShared: cached.lastShared,
     );
+  }
+
+  /// Subscribes (once) to backend sync updates so the article list
+  /// reloads automatically after a successful server-side scrape/backfill,
+  /// without the user needing to pull-to-refresh. Safe to call more than
+  /// once -- only the first call actually subscribes.
+  void startListeningForUpdates({required List<NewsSource> sources}) {
+    if (_listeningForUpdates) return;
+    _listeningForUpdates = true;
+    _subscribeToUpdates(() => loadFromCache(sources: sources));
   }
 
   Future<void> refresh({

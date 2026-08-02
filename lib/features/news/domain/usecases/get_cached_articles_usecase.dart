@@ -1,3 +1,4 @@
+import '../../../settings/domain/entities/news_source.dart';
 import '../entities/cached_news.dart';
 import '../repositories/news_repository.dart';
 
@@ -6,5 +7,6 @@ class GetCachedArticlesUseCase {
 
   GetCachedArticlesUseCase(this._repository);
 
-  Future<CachedNews> call() => _repository.getCachedNews();
+  Future<CachedNews> call({required List<NewsSource> sources}) =>
+      _repository.getCachedNews(sources: sources);
 }

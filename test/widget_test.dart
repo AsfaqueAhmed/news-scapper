@@ -38,7 +38,8 @@ class _FakeSettingsRepository implements SettingsRepository {
 
 class _FakeNewsRepository implements NewsRepository {
   @override
-  Future<CachedNews> getCachedNews() async => const CachedNews(articles: []);
+  Future<CachedNews> getCachedNews({required List<NewsSource> sources}) async =>
+      const CachedNews(articles: []);
 
   @override
   Future<RefreshResult> refresh({
@@ -59,6 +60,9 @@ class _FakeNewsRepository implements NewsRepository {
 
   @override
   Future<void> shareComposedCard(Article article, Uint8List pngBytes) async {}
+
+  @override
+  void subscribeToUpdates(void Function() onChanged) {}
 }
 
 void main() {
