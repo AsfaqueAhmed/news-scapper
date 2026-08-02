@@ -30,6 +30,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
   bool _sharing = false;
   int _currentPage = 0;
   _ViewMode _viewMode = _ViewMode.carousel;
+  bool _showBreakingBadge = true;
 
   @override
   void initState() {
@@ -85,14 +86,19 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
     setState(() => _currentPage = index);
   }
 
+  ShareCardConfig _configFor(ShareTemplate template) {
+    return ShareCardConfig(
+      titlePosition: template.titlePosition,
+      showTitle: template.showTitle,
+      showRibbonBadge: _showBreakingBadge,
+    );
+  }
+
   Future<void> _share() async {
     setState(() => _sharing = true);
     try {
       final template = shareTemplates[_currentPage];
-      final config = ShareCardConfig(
-        titlePosition: template.titlePosition,
-        showTitle: template.showTitle,
-      );
+      final config = _configFor(template);
       final notifier = ref.read(newsNotifierProvider.notifier);
       final png = await notifier.composeShareCard(widget.article, _image, config);
       await notifier.shareComposedCard(widget.article, png);
@@ -158,6 +164,24 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
               shareTemplates[_currentPage].label,
               style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
+            if (shareTemplates[_currentPage].titlePosition == TitlePosition.ribbon)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Show "Breaking News" banner',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    Switch(
+                      value: _showBreakingBadge,
+                      activeThumbColor: accent,
+                      onChanged: (value) => setState(() => _showBreakingBadge = value),
+                    ),
+                  ],
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
               child: FilledButton.icon(
@@ -271,10 +295,7 @@ class _SharePreviewScreenState extends ConsumerState<SharePreviewScreen> {
               title: widget.article.title,
               metaText: '${widget.article.sourceName} · ${relativeTime(widget.article.pubDate)}',
               category: widget.article.category,
-              config: ShareCardConfig(
-                titlePosition: template.titlePosition,
-                showTitle: template.showTitle,
-              ),
+              config: _configFor(template),
             ),
           ),
         ),

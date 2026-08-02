@@ -17,6 +17,11 @@ class ShareCardConfig {
   /// article source's own accent color.
   final Color? paletteColor;
 
+  /// Whether the ribbon template's "BREAKING NEWS" banner box is drawn.
+  /// Ignored by every other [titlePosition] -- the headline/photo/meta
+  /// layout never depends on it.
+  final bool showRibbonBadge;
+
   /// 1.0 = default cover crop, larger zooms in on the photo.
   final double zoom;
 
@@ -27,6 +32,7 @@ class ShareCardConfig {
     this.titlePosition = TitlePosition.ribbon,
     this.showTitle = true,
     this.paletteColor,
+    this.showRibbonBadge = true,
     this.zoom = 1.0,
     this.pan = Offset.zero,
   });
@@ -38,6 +44,7 @@ class ShareCardConfig {
     TitlePosition? titlePosition,
     bool? showTitle,
     Color? paletteColor,
+    bool? showRibbonBadge,
     double? zoom,
     Offset? pan,
   }) {
@@ -45,6 +52,7 @@ class ShareCardConfig {
       titlePosition: titlePosition ?? this.titlePosition,
       showTitle: showTitle ?? this.showTitle,
       paletteColor: paletteColor ?? this.paletteColor,
+      showRibbonBadge: showRibbonBadge ?? this.showRibbonBadge,
       zoom: zoom ?? this.zoom,
       pan: pan ?? this.pan,
     );
@@ -70,27 +78,13 @@ class ShareTemplate {
 const _white = Color(0xFFFFFFFF);
 const _nearBlack = Color(0xFF15151A);
 const _breakingRed = Color(0xFFE0272B);
-const _breakingBlack = Color(0xFF1A1A1E);
-const _navy = Color(0xFF1B3358);
-const _mustard = Color(0xFFE8A733);
-const _forest = Color(0xFF1F5C4A);
-const _maroon = Color(0xFF5C1A2B);
-const _amber = Color(0xFFF2994A);
-const _plum = Color(0xFF4A2545);
 
+/// Kept intentionally short -- more templates (and their palette colors)
+/// get added back here over time.
 const List<ShareTemplate> shareTemplates = [
   ShareTemplate(id: 'ribbon_red', label: 'Breaking Red', titlePosition: TitlePosition.ribbon, paletteColor: _breakingRed),
-  ShareTemplate(id: 'ribbon_black', label: 'Breaking Black', titlePosition: TitlePosition.ribbon, paletteColor: _breakingBlack),
-  ShareTemplate(id: 'ribbon_navy', label: 'Breaking Navy', titlePosition: TitlePosition.ribbon, paletteColor: _navy),
   ShareTemplate(id: 'card_source', label: 'Editorial', titlePosition: TitlePosition.card),
-  ShareTemplate(id: 'card_amber', label: 'Editorial Amber', titlePosition: TitlePosition.card, paletteColor: _amber),
-  ShareTemplate(id: 'panel_source', label: 'Bold', titlePosition: TitlePosition.panel),
-  ShareTemplate(id: 'panel_mustard', label: 'Bold Mustard', titlePosition: TitlePosition.panel, paletteColor: _mustard),
-  ShareTemplate(id: 'panel_forest', label: 'Bold Forest', titlePosition: TitlePosition.panel, paletteColor: _forest),
   ShareTemplate(id: 'spotlight_source', label: 'Spotlight', titlePosition: TitlePosition.spotlight),
-  ShareTemplate(id: 'spotlight_maroon', label: 'Spotlight Maroon', titlePosition: TitlePosition.spotlight, paletteColor: _maroon),
-  ShareTemplate(id: 'spotlight_plum', label: 'Spotlight Plum', titlePosition: TitlePosition.spotlight, paletteColor: _plum),
-  ShareTemplate(id: 'minimal', label: 'Minimal', titlePosition: TitlePosition.minimal),
   ShareTemplate(
     id: 'image',
     label: 'Photo only',
@@ -133,7 +127,8 @@ class ShareCardRenderer {
     if (config.showTitle) {
       switch (config.titlePosition) {
         case TitlePosition.ribbon:
-          _drawRibbon(canvas, bounds, title, metaText, category, palette, hasImage: hasImage);
+          _drawRibbon(canvas, bounds, title, metaText, category, palette,
+              hasImage: hasImage, showBadge: config.showRibbonBadge);
         case TitlePosition.card:
           _drawCard(canvas, bounds, title, metaText, category, palette);
         case TitlePosition.panel:
@@ -232,39 +227,42 @@ class ShareCardRenderer {
     String? category,
     Color bannerColor, {
     required bool hasImage,
+    required bool showBadge,
   }) {
     _drawBottomScrim(canvas, bounds, hasImage: hasImage);
 
-    final label = (category ?? 'Breaking News').toUpperCase();
-    final labelPainter = TextPainter(
-      text: TextSpan(
-        text: label,
-        style: const TextStyle(
-          color: _white,
-          fontSize: 26,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1,
+    if (showBadge) {
+      final label = (category ?? 'Breaking News').toUpperCase();
+      final labelPainter = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: const TextStyle(
+            color: _white,
+            fontSize: 26,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1,
+          ),
         ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
+        textDirection: TextDirection.ltr,
+      )..layout();
 
-    const padH = 30.0;
-    const padV = 16.0;
-    const notch = 22.0;
-    final bannerWidth = labelPainter.width + padH * 2 + notch;
-    final bannerHeight = labelPainter.height + padV * 2;
-    const top = 64.0;
+      const padH = 30.0;
+      const padV = 16.0;
+      const notch = 22.0;
+      final bannerWidth = labelPainter.width + padH * 2 + notch;
+      final bannerHeight = labelPainter.height + padV * 2;
+      const top = 64.0;
 
-    final path = Path()
-      ..moveTo(bounds.left, top)
-      ..lineTo(bounds.left + bannerWidth, top)
-      ..lineTo(bounds.left + bannerWidth - notch, top + bannerHeight)
-      ..lineTo(bounds.left, top + bannerHeight)
-      ..close();
-    canvas.drawShadow(path, _nearBlack, 6, false);
-    canvas.drawPath(path, Paint()..color = bannerColor);
-    labelPainter.paint(canvas, Offset(bounds.left + padH, top + padV));
+      final path = Path()
+        ..moveTo(bounds.left, top)
+        ..lineTo(bounds.left + bannerWidth, top)
+        ..lineTo(bounds.left + bannerWidth - notch, top + bannerHeight)
+        ..lineTo(bounds.left, top + bannerHeight)
+        ..close();
+      canvas.drawShadow(path, _nearBlack, 6, false);
+      canvas.drawPath(path, Paint()..color = bannerColor);
+      labelPainter.paint(canvas, Offset(bounds.left + padH, top + padV));
+    }
 
     const padding = 48.0;
     final maxWidth = bounds.width - padding * 2;
