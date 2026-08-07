@@ -1,12 +1,28 @@
-// Round-robin batched scrape: each invocation fetches the next `limit`
-// (default 5) enabled sources, tracked via the `fetch_cursor` table so a
-// 5-minute cron cycles through the full source list over time instead of
-// needing one cron job per fixed offset. Every per-source fetch attempt is
-// logged to `fetch_log` (status, http status, duration, article count,
-// error) for observability. Pass an explicit `offset` in the body to
-// override the cursor for a one-off manual run (doesn't touch the cursor).
+// Two modes, one implementation: this is the ONLY place RSS/Atom feeds get
+// fetched and parsed -- the app used to duplicate this logic client-side
+// (Dart), and the two implementations drifted out of sync (broken RFC 822
+// date parsing, a different article-id scheme), which is exactly what
+// caused corrupted pub_dates and duplicate rows. Now every ingestion path
+// goes through here.
+//
+//  - Rotation mode (no `sourceIds` in the body): each invocation fetches
+//    the next `limit` (default 5) enabled sources, tracked via the
+//    `fetch_cursor` table so a cron (every 2 minutes, offset by 3) cycles
+//    through the full source list over time.
+//  - On-demand mode (`sourceIds: string[]` in the body): fetches exactly
+//    those sources, e.g. the app's "pull to refresh". Skips the rotating
+//    cursor and the once-per-cycle prune -- those are exclusive to the
+//    scheduled rotation.
+//
+// Different sources are fetched in parallel; within one source, its RSS
+// and HTML attempts run sequentially (see `attempts.push(await ...)`
+// below), so a slow homepage scrape adds to that source's own turn rather
+// than the whole batch's. Every per-source fetch attempt is logged to
+// `fetch_log` (status, http status, duration, article count, error) for
+// observability.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { XMLParser } from "npm:fast-xml-parser@4";
+import { htmlScrapers } from "./html_scrapers.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -29,7 +45,8 @@ const corsHeaders = {
 interface Source {
   id: string;
   name: string;
-  feed_url: string;
+  feed_url: string | null;
+  base_url: string | null;
 }
 
 interface ArticleRow {
@@ -49,6 +66,7 @@ interface FetchLogRow {
   source_id: string;
   source_name: string;
   feed_url: string;
+  method: "rss" | "html";
   status: "success" | "error";
   http_status: number | null;
   articles_found: number | null;
@@ -205,10 +223,10 @@ async function parseFeed(xml: string, source: Source): Promise<ArticleRow[]> {
   throw new Error("Unrecognized feed format (not RSS or Atom)");
 }
 
-async function fetchSource(source: Source): Promise<ArticleRow[]> {
+async function fetchRss(source: Source): Promise<ArticleRow[]> {
   let response: Response;
   try {
-    response = await fetch(source.feed_url, {
+    response = await fetch(source.feed_url!, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; NewsScrapperBot/1.0)",
         "Accept": "application/rss+xml, application/xml, text/xml, */*",
@@ -225,11 +243,50 @@ async function fetchSource(source: Source): Promise<ArticleRow[]> {
   return parseFeed(body, source);
 }
 
+async function fetchHtml(source: Source): Promise<ArticleRow[]> {
+  const scraper = htmlScrapers[source.id];
+  if (!scraper || !source.base_url) return [];
+  let response: Response;
+  try {
+    response = await fetch(source.base_url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; NewsScrapperBot/1.0)",
+        "Accept": "text/html",
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+  } catch (e) {
+    throw new FetchError(`Network error: ${e}`);
+  }
+  if (!response.ok) {
+    throw new FetchError(`HTTP ${response.status}`, response.status);
+  }
+  const html = await response.text();
+  const items = scraper(html, source.base_url);
+  const rows: ArticleRow[] = [];
+  for (const item of items) {
+    rows.push({
+      id: await articleId(item.link, source.id, item.title),
+      title: item.title,
+      link: item.link,
+      description: null,
+      image_url: item.imageUrl,
+      pub_date: new Date().toISOString(),
+      source_id: source.id,
+      source_name: source.name,
+      is_read: false,
+    });
+  }
+  return rows;
+}
+
 async function enrichArticles(
   articles: ArticleRow[],
   runId: string,
+  apiToken?: string,
 ): Promise<Array<{ articleId: string; category: string | null; groupId: string | null }>> {
-  if (!OPENROUTER_API_KEY || articles.length === 0) return [];
+  const key = apiToken || OPENROUTER_API_KEY;
+  if (!key || articles.length === 0) return [];
 
   const indexed = articles.map((a, i) => ({
     index: i,
@@ -256,7 +313,7 @@ Respond with ONLY a JSON array, no prose, in this exact shape:
   const upstream = await fetch(OPENROUTER_ENDPOINT, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -296,12 +353,65 @@ Respond with ONLY a JSON array, no prose, in this exact shape:
   return results;
 }
 
+interface FetchAttempt {
+  articles: ArticleRow[];
+  logRow: FetchLogRow;
+}
+
+async function attemptFetch(
+  source: Source,
+  method: "rss" | "html",
+  url: string,
+  runId: string,
+  run: () => Promise<ArticleRow[]>,
+): Promise<FetchAttempt> {
+  const calledAt = new Date();
+  const t0 = performance.now();
+  try {
+    const articles = await run();
+    return {
+      articles,
+      logRow: {
+        run_id: runId,
+        source_id: source.id,
+        source_name: source.name,
+        feed_url: url,
+        method,
+        status: "success",
+        http_status: 200,
+        articles_found: articles.length,
+        duration_ms: Math.round(performance.now() - t0),
+        error_message: null,
+        called_at: calledAt.toISOString(),
+      },
+    };
+  } catch (e) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    return {
+      articles: [],
+      logRow: {
+        run_id: runId,
+        source_id: source.id,
+        source_name: source.name,
+        feed_url: url,
+        method,
+        status: "error",
+        http_status: e instanceof FetchError ? e.httpStatus ?? null : null,
+        articles_found: null,
+        duration_ms: Math.round(performance.now() - t0),
+        error_message: errorMessage,
+        called_at: calledAt.toISOString(),
+      },
+    };
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  let body: { offset?: number; limit?: number } = {};
+  let body: { offset?: number; limit?: number; sourceIds?: string[]; openRouterToken?: string } = {};
   if (req.method === "POST") {
     try {
       body = await req.json();
@@ -310,82 +420,111 @@ Deno.serve(async (req: Request) => {
     }
   }
   const limit = body.limit ?? DEFAULT_BATCH_SIZE;
+  const explicitSourceIds =
+    Array.isArray(body.sourceIds) && body.sourceIds.length > 0 ? body.sourceIds : null;
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
   const errors: string[] = [];
   const runId = crypto.randomUUID();
 
-  const { data: allSources, error: sourcesError } = await supabase
-    .from("sources")
-    .select("id, name, feed_url")
-    .eq("enabled", true)
-    .order("id");
+  let sources: Source[];
+  let offset = 0;
+  let usingCursor = false;
+  let totalCount = 0;
 
-  if (sourcesError) {
-    return new Response(JSON.stringify({ error: sourcesError.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  const totalCount = (allSources ?? []).length;
-
-  // usingCursor calls atomically claim their offset AND advance the
-  // shared cursor in one row-locked transaction (claim_next_fetch_offset),
-  // so two overlapping invocations can never read the same offset and
-  // duplicate a batch.
-  const usingCursor = typeof body.offset !== "number";
-  let offset: number;
-  if (!usingCursor) {
-    offset = totalCount === 0 ? 0 : (body.offset as number) % totalCount;
-  } else {
-    const { data: claimedOffset, error: claimError } = await supabase.rpc(
-      "claim_next_fetch_offset",
-      { p_limit: limit, p_total: totalCount },
-    );
-    if (claimError) {
-      return new Response(JSON.stringify({ error: `cursor claim: ${claimError.message}` }), {
+  if (explicitSourceIds) {
+    // On-demand mode: fetch exactly the requested sources, skipping the
+    // rotating-cursor bookkeeping below (that's exclusive to the
+    // scheduled cron sweep).
+    const { data: requested, error: requestedError } = await supabase
+      .from("sources")
+      .select("id, name, feed_url, base_url")
+      .in("id", explicitSourceIds)
+      .eq("enabled", true);
+    if (requestedError) {
+      return new Response(JSON.stringify({ error: requestedError.message }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    offset = claimedOffset ?? 0;
+    sources = (requested ?? []) as Source[];
+  } else {
+    const { data: allSources, error: sourcesError } = await supabase
+      .from("sources")
+      .select("id, name, feed_url, base_url")
+      .eq("enabled", true)
+      .order("id");
+
+    if (sourcesError) {
+      return new Response(JSON.stringify({ error: sourcesError.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    totalCount = (allSources ?? []).length;
+
+    // usingCursor calls atomically claim their offset AND advance the
+    // shared cursor in one row-locked transaction (claim_next_fetch_offset),
+    // so two overlapping invocations can never read the same offset and
+    // duplicate a batch.
+    usingCursor = typeof body.offset !== "number";
+    if (!usingCursor) {
+      offset = totalCount === 0 ? 0 : (body.offset as number) % totalCount;
+    } else {
+      const { data: claimedOffset, error: claimError } = await supabase.rpc(
+        "claim_next_fetch_offset",
+        { p_limit: limit, p_total: totalCount },
+      );
+      if (claimError) {
+        return new Response(JSON.stringify({ error: `cursor claim: ${claimError.message}` }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      offset = claimedOffset ?? 0;
+    }
+
+    sources = (allSources ?? []).slice(offset, offset + limit) as Source[];
   }
 
-  const sources = (allSources ?? []).slice(offset, offset + limit) as Source[];
+  const results = await Promise.all(sources.map(async (source) => {
+    const attempts: FetchAttempt[] = [];
+    if (source.feed_url) {
+      attempts.push(await attemptFetch(source, "rss", source.feed_url, runId, () => fetchRss(source)));
+    }
+    if (htmlScrapers[source.id] && source.base_url) {
+      attempts.push(await attemptFetch(source, "html", source.base_url, runId, () => fetchHtml(source)));
+    }
+    if (attempts.length === 0) {
+      // A source with no RSS feed and no registered HTML scraper (e.g. one
+      // just added via the app with only a Base URL, for an outlet that
+      // hasn't gotten a scraper yet) would otherwise fetch nothing and
+      // leave no trace anywhere -- not even a fetch_log row -- making it
+      // indistinguishable from a source that's simply quiet. Logging it
+      // makes that state visible instead of silent.
+      attempts.push(
+        await attemptFetch(source, "html", source.base_url ?? "", runId, () => {
+          throw new Error("No feed_url and no registered HTML scraper for this source");
+        }),
+      );
+    }
+    return { source, attempts };
+  }));
 
   const fetched: ArticleRow[] = [];
+  const rssArticles: ArticleRow[] = [];
+  const htmlArticles: ArticleRow[] = [];
   const logRows: FetchLogRow[] = [];
-  for (const source of sources) {
-    const calledAt = new Date();
-    const t0 = performance.now();
-    let status: "success" | "error" = "success";
-    let httpStatus: number | null = null;
-    let articlesFound: number | null = null;
-    let errorMessage: string | null = null;
-    try {
-      const articles = await fetchSource(source);
-      fetched.push(...articles);
-      articlesFound = articles.length;
-      httpStatus = 200;
-    } catch (e) {
-      status = "error";
-      errorMessage = e instanceof Error ? e.message : String(e);
-      httpStatus = e instanceof FetchError ? e.httpStatus ?? null : null;
-      errors.push(`${source.name}: ${errorMessage}`);
+  for (const r of results) {
+    for (const attempt of r.attempts) {
+      fetched.push(...attempt.articles);
+      (attempt.logRow.method === "rss" ? rssArticles : htmlArticles).push(...attempt.articles);
+      logRows.push(attempt.logRow);
+      if (attempt.logRow.status === "error") {
+        errors.push(`${r.source.name} (${attempt.logRow.method}): ${attempt.logRow.error_message}`);
+      }
     }
-    logRows.push({
-      run_id: runId,
-      source_id: source.id,
-      source_name: source.name,
-      feed_url: source.feed_url,
-      status,
-      http_status: httpStatus,
-      articles_found: articlesFound,
-      duration_ms: Math.round(performance.now() - t0),
-      error_message: errorMessage,
-      called_at: calledAt.toISOString(),
-    });
   }
 
   if (logRows.length > 0) {
@@ -393,9 +532,28 @@ Deno.serve(async (req: Request) => {
     if (logError) errors.push(`fetch_log insert: ${logError.message}`);
   }
 
-  const deduped = Object.values(
-    Object.fromEntries(fetched.map((a) => [a.id, a])),
-  ) as ArticleRow[];
+  // RSS always wins over HTML for the same article (same link -> same id):
+  // seed the map from `rssArticles` first, then let `htmlArticles` fill in
+  // only ids RSS didn't already cover *within this tick*. Dedup within one
+  // tick isn't enough on its own, though -- across ticks, an article the
+  // homepage still lists but this tick's RSS payload doesn't happen to
+  // include (RSS windows are short) would otherwise get its already-good
+  // pub_date/description/image_url overwritten by the plain `upsert` below,
+  // since upsert replaces the whole row on conflict. So html-only rows are
+  // upserted separately with `ignoreDuplicates: true` (ON CONFLICT DO
+  // NOTHING): a homepage article lands once, the first time any tick sees
+  // it, and every later tick leaves an existing row completely alone
+  // rather than re-stamping it with a fresh "now" and a null
+  // description/image. Only rows RSS actually re-affirms in a given tick
+  // get the full overwrite -- which is correct, since RSS is the
+  // authoritative source when it has an opinion.
+  const seen = new Map<string, ArticleRow>();
+  for (const article of rssArticles) seen.set(article.id, article);
+  for (const article of htmlArticles) {
+    if (!seen.has(article.id)) seen.set(article.id, article);
+  }
+  const deduped = Array.from(seen.values());
+  const rssIds = new Set(rssArticles.map((a) => a.id));
 
   if (deduped.length > 0) {
     // Exclude is_read: a re-scraped article is always freshly parsed as
@@ -404,10 +562,26 @@ Deno.serve(async (req: Request) => {
     // payload means new rows still get false (the column default) while
     // existing rows keep whatever is_read they had.
     const rows = deduped.map(({ is_read: _is_read, ...rest }) => rest);
-    const { error: upsertError } = await supabase.from("articles").upsert(rows);
-    if (upsertError) {
-      errors.push(`upsert: ${upsertError.message}`);
-    } else {
+    const rssRows = rows.filter((row) => rssIds.has(row.id));
+    const htmlOnlyRows = rows.filter((row) => !rssIds.has(row.id));
+    let upsertFailed = false;
+
+    if (rssRows.length > 0) {
+      const { error } = await supabase.from("articles").upsert(rssRows);
+      if (error) {
+        errors.push(`upsert (rss): ${error.message}`);
+        upsertFailed = true;
+      }
+    }
+    if (htmlOnlyRows.length > 0) {
+      const { error } = await supabase.from("articles").upsert(htmlOnlyRows, { ignoreDuplicates: true });
+      if (error) {
+        errors.push(`upsert (html-only): ${error.message}`);
+        upsertFailed = true;
+      }
+    }
+
+    if (!upsertFailed) {
       // Bump the app's realtime sync counter -- but only when something
       // actually landed, so idle cron ticks don't trigger client reloads.
       const { error: bumpError } = await supabase.rpc("bump_sync_version");
@@ -418,7 +592,7 @@ Deno.serve(async (req: Request) => {
   let enrichedCount = 0;
   if (ENRICHMENT_ENABLED && deduped.length > 0) {
     try {
-      const enrichments = await enrichArticles(deduped, runId);
+      const enrichments = await enrichArticles(deduped, runId, body.openRouterToken);
       for (const e of enrichments) {
         const values: Record<string, unknown> = {};
         if (e.category !== null) values.category = e.category;
@@ -432,23 +606,28 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Prune once per full cycle: fires whenever a turn starts back at the
-  // beginning of the rotation (offset 0), same cadence regardless of how
-  // many sources/batches there are.
-  if (offset === 0) {
+  // Prune once per full cycle: fires whenever a scheduled rotation turn
+  // starts back at the beginning (offset 0). Exclusive to rotation mode --
+  // on-demand refreshes shouldn't trigger a prune sweep.
+  if (!explicitSourceIds && offset === 0) {
     const cutoff = new Date(Date.now() - PRUNE_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const { error: pruneError } = await supabase.from("articles").delete().lt("pub_date", cutoff);
     if (pruneError) errors.push(`prune: ${pruneError.message}`);
   }
 
   // The cursor was already atomically advanced by claim_next_fetch_offset
-  // above; this is purely for the response, not a second write.
-  let nextOffset = offset + limit;
-  if (totalCount === 0 || nextOffset >= totalCount) nextOffset = 0;
+  // above; this is purely for the response, not a second write. Only
+  // meaningful in rotation mode.
+  let nextOffset = 0;
+  if (!explicitSourceIds) {
+    nextOffset = offset + limit;
+    if (totalCount === 0 || nextOffset >= totalCount) nextOffset = 0;
+  }
 
   return new Response(
     JSON.stringify({
       runId,
+      mode: explicitSourceIds ? "sourceIds" : "rotation",
       usingCursor,
       offset,
       nextOffset,
